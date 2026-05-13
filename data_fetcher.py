@@ -29,30 +29,43 @@ def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def get_market_indices() -> dict:
-    """주요 시장 지수 현재 데이터 수집 (2분 캐싱)"""
+def get_market_indices_v2() -> dict:
+    """주요 시장 지수 현재 데이터 초고속 수집 + NaN 결측 방지벽 (2분 캐싱)"""
     results = {}
-    for name, info in MARKET_INDICES.items():
-        try:
-            stock = yf.Ticker(info["ticker"])
-            hist = stock.history(period="5d")
-            if hist.empty or len(hist) < 2:
+    tickers = [info["ticker"] for info in MARKET_INDICES.values()]
+    
+    try:
+        # 1. 모든 지수를 단 한 번의 병렬 배치 쿼리로 고속 수집 (레이트리밋 완벽 우회)
+        df = yf.download(tickers, period="5d", group_by='ticker', auto_adjust=True, progress=False)
+        
+        for name, info in MARKET_INDICES.items():
+            try:
+                sym = info["ticker"]
+                if sym not in df.columns.get_level_values(0):
+                    continue
+                
+                # 시간대 불일치 및 휴장 등으로 인한 빈 슬롯(NaN) 결측 행 전면 차단
+                idx_df = df[sym].dropna(subset=["Close"])
+                if idx_df.empty or len(idx_df) < 2:
+                    continue
+                
+                current = float(idx_df["Close"].iloc[-1])
+                previous = float(idx_df["Close"].iloc[-2])
+                change = current - previous
+                change_pct = (change / previous) * 100
+                
+                results[name] = {
+                    "current": current,
+                    "change": change,
+                    "change_pct": change_pct,
+                    "flag": info["flag"],
+                    "name": info["name"],
+                }
+            except Exception:
                 continue
-            if hist.columns.nlevels > 1:
-                hist.columns = hist.columns.get_level_values(0)
-            current = float(hist["Close"].iloc[-1])
-            previous = float(hist["Close"].iloc[-2])
-            change = current - previous
-            change_pct = (change / previous) * 100
-            results[name] = {
-                "current": current,
-                "change": change,
-                "change_pct": change_pct,
-                "flag": info["flag"],
-                "name": info["name"],
-            }
-        except Exception:
-            continue
+    except Exception:
+        pass
+        
     return results
 
 
@@ -103,7 +116,7 @@ def get_financial_statements(ticker: str) -> dict:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_watchlist_data(tickers: list) -> list:
+def get_watchlist_data_v2(tickers: list) -> list:
     """관심 종목 리스트 데이터 초고속 일괄 수집 + 시총 정렬 (레이트리밋 내성형 배치 모드)"""
     if not tickers:
         return []

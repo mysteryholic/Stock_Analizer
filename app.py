@@ -308,7 +308,7 @@ def render_sidebar():
 # ══════════════════════════════════════════════
 def page_dashboard():
     """메인 대시보드 페이지"""
-    from data_fetcher import get_market_indices, get_watchlist_data, format_price
+    from data_fetcher import get_market_indices_v2, get_watchlist_data_v2, format_price
     from styles import render_live_indicator
 
     init_watchlist_state()
@@ -393,7 +393,7 @@ def page_dashboard():
     if my_wl:
         st.markdown("#### ⭐ My Watchlist")
         with st.spinner("관심 종목 데이터 로딩..."):
-            wl_data_map = {d["ticker"]: d for d in get_watchlist_data(my_wl)}
+            wl_data_map = {d["ticker"]: d for d in get_watchlist_data_v2(my_wl)}
 
         # 가로형 카드 레이아웃 (최대 4열)
         n_cols = min(len(my_wl), 4)
@@ -429,7 +429,7 @@ def page_dashboard():
 
     # ── 시장 지수 카드 ─────────────────────────────────
     with st.spinner("시장 데이터 로딩 중..."):
-        indices = get_market_indices()
+        indices = get_market_indices_v2()
 
     if indices:
         cols = st.columns(min(len(indices), 3))
@@ -455,13 +455,20 @@ def page_dashboard():
     for tab, (group_name, tickers) in zip(tabs, DEFAULT_WATCHLIST.items()):
         with tab:
             with st.spinner(f"{group_name} 데이터 로딩..."):
-                watchlist = get_watchlist_data(tickers)
+                watchlist = get_watchlist_data_v2(tickers)
 
             if watchlist:
                 import pandas as pd
                 from data_fetcher import format_number
                 
                 df_display = pd.DataFrame(watchlist)
+                
+                # 🛡️ 이전 구형 캐시 데이터 오염에 의한 KeyError 크래시 방지벽 가동
+                if "market_cap" not in df_display.columns:
+                    df_display["market_cap"] = 0
+                if "currency" not in df_display.columns:
+                    df_display["currency"] = ""
+                    
                 df_display["등락률"] = df_display["change_pct"].apply(
                     lambda x: f"{'🟢' if x >= 0 else '🔴'} {x:+.2f}%"
                 )
