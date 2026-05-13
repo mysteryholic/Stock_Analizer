@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from config import COLORS, BACKTEST_DEFAULTS
 import streamlit as st
+from data_fetcher import resolve_korean_ticker
 
 
 class PortfolioBacktester:
@@ -42,19 +43,22 @@ class PortfolioBacktester:
         """주가 데이터 수집"""
         import yfinance as yf
         try:
+            # 한국 6자리 티커 등 자동 변환 후 일괄 취득 처리
+            resolved_tickers = [resolve_korean_ticker(t) for t in tickers]
             data = yf.download(
-                list(tickers), start=start, end=end,
+                resolved_tickers, start=start, end=end,
                 auto_adjust=True, progress=False,
             )
             if data.empty:
                 return pd.DataFrame()
             if "Close" in data.columns or (hasattr(data.columns, 'get_level_values') and "Close" in data.columns.get_level_values(0)):
                 if len(tickers) == 1:
+                    resolved_single = resolve_korean_ticker(tickers[0])
                     if isinstance(data.columns, pd.MultiIndex):
                         prices = data["Close"]
                     else:
                         prices = data[["Close"]]
-                        prices.columns = [tickers[0]]
+                        prices.columns = [resolved_single]
                 else:
                     prices = data["Close"]
             else:

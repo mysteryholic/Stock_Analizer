@@ -102,34 +102,27 @@ def render_stock_selector(label: str, key_prefix: str, default_ticker: str = "AA
 
     # 4. 제출 이벤트 처리 (엔터 클릭 또는 버튼 클릭)
     if submitted and query_val:
-        import yfinance as yf
-        q = query_val.strip().upper()
+        from data_fetcher import unified_search
+        q = query_val.strip()
         try:
             with st.spinner("정보 검색 중..."):
-                res = yf.Search(q, max_results=4)
-            if res and res.quotes:
-                top_sym = res.quotes[0].get("symbol", "").upper()
+                res_list = unified_search(q, max_results=4)
+            if res_list:
+                top_sym = res_list[0]["symbol"].upper()
                 # 사용자가 입력한 값이 첫 번째 검색 결과의 티커명과 완벽히 일치할 때 → 즉시 통과/선택
-                if q == top_sym:
+                if q.upper() == top_sym:
                     st.session_state[session_key] = top_sym
                     st.session_state["global_ticker"] = top_sym
                     st.session_state[cache_key] = None # 이전 검색 찌꺼기 소거
                     st.toast(f"✅ {top_sym} 종목이 활성화되었습니다!")
                     st.rerun()
                 else:
-                    # 사명(예: Tesla) 또는 유사어 검색일 때 → 추천 목록 화면 바인딩
-                    st.session_state[cache_key] = [
-                        {
-                            "symbol": quote.get("symbol"),
-                            "name": quote.get("shortname") or quote.get("longname") or "이름없음",
-                            "exchange": quote.get("exchange", "N/A")
-                        }
-                        for quote in res.quotes
-                    ]
+                    # 사명 또는 유사어 검색일 때 → 추천 목록 화면 바인딩
+                    st.session_state[cache_key] = res_list
             else:
                 # 검색 불가 시 사용자가 입력한 값을 티커로 단독 밀어넣기 시도
-                st.session_state[session_key] = q
-                st.session_state["global_ticker"] = q
+                st.session_state[session_key] = q.upper()
+                st.session_state["global_ticker"] = q.upper()
                 st.session_state[cache_key] = None
                 st.rerun()
         except Exception:
@@ -144,12 +137,12 @@ def render_stock_selector(label: str, key_prefix: str, default_ticker: str = "AA
         st.markdown("**💡 검색 추천 목록 (분석할 종목을 적용해 보세요):**")
         for item in st.session_state[cache_key]:
             sym = item["symbol"]
-            nm = item["name"][:17] + ".." if len(item["name"]) > 19 else item["name"]
+            nm = item["name"]
             ex = item["exchange"]
             
             r_c1, r_c2 = st.columns([3, 1])
             with r_c1:
-                st.markdown(f"📌 `{sym}` &nbsp; **{nm}** &nbsp; <span style='color:#8b92a5; font-size:0.75rem;'>[{ex}]</span>", unsafe_allow_html=True)
+                st.markdown(f"📊 **{nm}** &nbsp;&nbsp; `{sym}` &nbsp; <span style='color:#8b92a5; font-size:0.8rem;'>[{ex}]</span>", unsafe_allow_html=True)
             with r_c2:
                 if st.button("📊 분석 적용", key=f"btn_apply_{key_prefix}_{sym}", width="stretch"):
                     st.session_state[session_key] = sym
@@ -195,6 +188,12 @@ def render_sidebar():
 
         # 종목 검색 (사이드바 — 글로벌 티커 설정)
         st.markdown('<p style="font-size:0.7rem; color:#8b92a5; font-weight:600; letter-spacing:0.5px;">🔍 종목 검색</p>', unsafe_allow_html=True)
+        
+        # 🛡️ 대시보드/외부 분석 적용 시, 사이드바 위젯 인스턴스화 직전에 세션 상태를 안전하게 동기화 (StreamlitAPIException 방어벽)
+        g_tick = st.session_state.get("global_ticker", "")
+        if g_tick and st.session_state.get("sidebar_ticker_input", "") != g_tick:
+            st.session_state["sidebar_ticker_input"] = g_tick
+
         search_col, pop_col = st.columns([3, 1])
         with search_col:
             ticker_input = st.text_input(
@@ -215,15 +214,17 @@ def render_sidebar():
                     label_visibility="collapsed",
                 )
                 if sb_search:
-                    import yfinance as yf
+                    from data_fetcher import unified_search
                     try:
                         with st.spinner("조회 중..."):
-                            r = yf.Search(sb_search.strip(), max_results=5)
-                        if r and r.quotes:
-                            for q in r.quotes:
-                                sym = q.get("symbol")
-                                nm = (q.get("shortname") or q.get("longname") or "")[:14]
-                                if st.button(f"{sym} | {nm}", key=f"sb_pop_{sym}", width="stretch"):
+                            res_list = unified_search(sb_search.strip(), max_results=5)
+                        if res_list:
+                            for item in res_list:
+                                sym = item["symbol"]
+                                nm = item["name"][:12]
+                                ex = item["exchange"]
+                                btn_label = f"📊 {nm} ({sym}) [{ex}]"
+                                if st.button(btn_label, key=f"sb_pop_{sym}", width="stretch"):
                                     st.session_state["global_ticker"] = sym
                                     st.toast(f"✅ {sym} 적용!")
                                     st.rerun()
@@ -336,24 +337,17 @@ def page_dashboard():
         with dash_col2:
             submitted = st.form_submit_button("🔍 검색", width="stretch")
 
-    # 폼이 제출되었을 때만 Yahoo DB 검색 1회 실행 후 세션에 캐시
+    # 폼이 제출되었을 때만 통합 검색 1회 실행 후 세션에 캐시
     if submitted and dash_search_q:
-        import yfinance as yf
+        from data_fetcher import unified_search
         try:
             with st.spinner("검색 중..."):
-                res = yf.Search(dash_search_q.strip(), max_results=5)
-            if res and res.quotes:
-                st.session_state.dash_search_results = [
-                    {
-                        "symbol": q.get("symbol"),
-                        "name": q.get("shortname") or q.get("longname") or q.get("symbol"),
-                        "exchange": q.get("exchange", "N/A")
-                    }
-                    for q in res.quotes
-                ]
+                res_list = unified_search(dash_search_q.strip(), max_results=5)
+            if res_list:
+                st.session_state.dash_search_results = res_list
             else:
                 st.session_state.dash_search_results = []
-                st.warning("🔍 검색 결과가 없습니다. 영문 사명이나 티커 번호로 시도해보세요.")
+                st.warning("🔍 검색 결과가 없습니다. 한글 기업명, 영문 사명, 혹은 티커 번호로 시도해보세요.")
         except Exception as e:
             st.error(f"⚠️ 검색 오류: {str(e)}")
             st.session_state.dash_search_results = None
@@ -369,7 +363,7 @@ def page_dashboard():
 
             r1, r2, r3 = st.columns([3, 1, 1])
             with r1:
-                st.markdown(f"**{nm}** &nbsp;&nbsp; `{sym}` &nbsp; [{ex}]")
+                st.markdown(f"📊 **{nm}** &nbsp;&nbsp; `{sym}` &nbsp; <span style='color:#8b92a5; font-size:0.8rem;'>[{ex}]</span>", unsafe_allow_html=True)
             with r2:
                 if in_wl:
                     if st.button("❌ 해제", key=f"wl_remove_{sym}", width="stretch"):
@@ -385,6 +379,7 @@ def page_dashboard():
                 if st.button("📈 분석", key=f"wl_go_{sym}", width="stretch"):
                     st.session_state["global_ticker"] = sym
                     st.toast(f"✅ {sym} 분석 페이지 연동!")
+                    st.rerun()
 
     st.divider()
 
@@ -432,7 +427,7 @@ def page_dashboard():
         indices = get_market_indices_v2()
 
     if indices:
-        cols = st.columns(min(len(indices), 3))
+        cols = st.columns(min(len(indices), 4))
         for i, (name, data) in enumerate(indices.items()):
             with cols[i % len(cols)]:
                 delta_str = f"{data['change']:+,.2f} ({data['change_pct']:+.2f}%)"
@@ -527,7 +522,7 @@ def page_technical(ticker_input: str):
             info = get_stock_info(ticker)
 
         if df.empty:
-            st.error(f"❌ {ticker}의 데이터를 찾을 수 없습니다. 종목 코드를 확인해주세요.")
+            st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
             return
 
         # 종목 정보 카드
@@ -643,7 +638,7 @@ def page_ai_analyst(ticker_input: str):
                     financials = get_financial_statements(analysis_ticker)
 
                 if "error" in info:
-                    st.error(f"❌ {analysis_ticker} 데이터를 찾을 수 없습니다.")
+                    st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
                 else:
                     data_text = format_financial_data_for_prompt(info, financials)
                     st.markdown("---")
@@ -676,7 +671,7 @@ def page_ai_prediction(ticker_input: str):
             success = predictor.predict(ticker, data_period, forecast_days)
 
         if not success:
-            st.error(f"❌ {ticker} 예측 실패. 종목 코드와 데이터 기간을 확인해주세요.")
+            st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
             return
 
         # 투자 매력도 & 기대 수익률
@@ -760,21 +755,37 @@ def page_backtester():
             )
             
             if search_q:
-                import yfinance as yf
+                q_upper = search_q.strip().upper()
+                # 💡 직접 입력 수동 반영 가이드 (6자리 숫자 코스피/코스닥 판정 엔진 포함)
+                from data_fetcher import resolve_korean_ticker
+                resolved_input = resolve_korean_ticker(q_upper)
+                
+                if st.button(f"➕ '{resolved_input}' 직접 포트폴리오 등록", key=f"s_direct_{q_upper}", width="stretch"):
+                    formatted_name = f"{resolved_input} (직접 추가)"
+                    if formatted_name not in st.session_state.bt_asset_map:
+                        st.session_state.bt_asset_map[formatted_name] = resolved_input
+                    if formatted_name not in st.session_state.bt_selected_assets:
+                        st.session_state.bt_selected_assets.append(formatted_name)
+                    st.toast(f"✅ {resolved_input} 추가 성공!")
+                    st.rerun()
+                
+                st.markdown("<hr style='margin: 0.8rem 0;'/>", unsafe_allow_html=True)
+
+                from data_fetcher import unified_search
                 try:
                     with st.spinner("마켓 데이터 조회 중..."):
-                        search_res = yf.Search(search_q.strip(), max_results=6)
+                        res_list = unified_search(search_q.strip(), max_results=6)
                     
-                    if search_res and search_res.quotes:
+                    if res_list:
                         st.markdown("**📋 검색 매칭 결과 (클릭 시 즉시 포트폴리오 등록):**")
-                        for quote in search_res.quotes:
-                            symbol = quote.get("symbol")
-                            raw_name = quote.get("shortname") or quote.get("longname") or "이름없음"
-                            ex = quote.get("exchange", "N/A")
+                        for item in res_list:
+                            symbol = item["symbol"]
+                            raw_name = item["name"]
+                            ex = item["exchange"]
                             
                             # 표시 가독성을 위해 적절한 문자열 압축
-                            disp_name = raw_name[:15] + ".." if len(raw_name) > 17 else raw_name
-                            btn_label = f"➕ [{ex}] {symbol} | {disp_name}"
+                            disp_name = raw_name[:14] + ".." if len(raw_name) > 16 else raw_name
+                            btn_label = f"➕ {disp_name} ({symbol}) [{ex}]"
                             
                             # 버튼 액션: 맵에 넣고, 세션 선택 리스트에 병합 후 새로고침
                             if st.button(btn_label, key=f"s_btn_{symbol}", width="stretch"):

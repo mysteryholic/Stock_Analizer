@@ -8,10 +8,11 @@ StockInsight - 전역 설정 모듈
 # ──────────────────────────────────────────────
 MARKET_INDICES = {
     "KOSPI": {"ticker": "^KS11", "name": "코스피", "flag": "🇰🇷"},
+    "KOSDAQ": {"ticker": "^KQ11", "name": "코스닥", "flag": "🇰🇷"},
+    "환율 (USD/KRW)": {"ticker": "KRW=X", "name": "원/달러", "flag": "💵"},
     "S&P 500": {"ticker": "^GSPC", "name": "S&P 500", "flag": "🇺🇸"},
     "NASDAQ": {"ticker": "^IXIC", "name": "나스닥", "flag": "🇺🇸"},
     "DOW": {"ticker": "^DJI", "name": "다우존스", "flag": "🇺🇸"},
-    "KOSDAQ": {"ticker": "^KQ11", "name": "코스닥", "flag": "🇰🇷"},
     "Nikkei 225": {"ticker": "^N225", "name": "닛케이", "flag": "🇯🇵"},
 }
 
