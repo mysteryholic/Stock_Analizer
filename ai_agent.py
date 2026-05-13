@@ -18,12 +18,15 @@ class HuggingFaceAgent:
         """HF InferenceClient 초기화"""
         try:
             from huggingface_hub import InferenceClient
-            # 세션 상태 또는 secrets로부터 토큰 확보
-            token = st.session_state.get("hf_token", "") or st.secrets.get("HF_TOKEN", "")
-            if token:
+            # 세션 상태 또는 secrets로부터 토큰 확보 및 엄격한 안전 가공(문자열화 및 양쪽 공백 소거)
+            raw_token = st.session_state.get("hf_token", "") or st.secrets.get("HF_TOKEN", "")
+            token = str(raw_token).strip() if raw_token else ""
+            
+            # 토큰의 실질적인 존재 유무 판독
+            if token and token.lower() != "none":
                 self.client = InferenceClient(api_key=token)
             else:
-                # 최신 2026 SDK 정책 상 비인증 호출이 거부되므로, 토큰 없을 시 None 처리
+                # 비인증 호출 시 충돌을 막기 위해 명시적으로 None 할당
                 self.client = None
         except Exception:
             self.client = None
@@ -58,7 +61,23 @@ class HuggingFaceAgent:
                 yield response.choices[0].message.content
         except Exception as e:
             error_msg = str(e)
-            if "rate" in error_msg.lower() or "429" in error_msg:
+            # 런타임 도중 발견된 토큰 누락(api_key 부재) 에러 차단 및 전용 안내문 사출
+            if any(keyword in error_msg.lower() for keyword in ["api_key", "auth", "token"]):
+                yield (
+                    "### 🌐 배포 환경 전용 API 연동 가이드 ⚠️\n\n"
+                    "웹 서버(예: Streamlit Cloud 등) 배포 환경에 **무상 Hugging Face 키가 주입되지 않아** 실행이 잠시 멈춘 상태입니다.\n\n"
+                    "**배포판 사이트에서 즉시 작동하게 만드는 2가지 해법:**\n\n"
+                    "**✅ 방법 A. 즉석 처방 (사용자용)**\n"
+                    "- 왼쪽 사이드바 아코디언 메뉴를 열어 **[HF Access Token]** 란에 발급받으신 무료 키(`hf_...`)를 직접 써넣고 작동시키세요!\n\n"
+                    "**✅ 방법 B. 영구 귀속 (개발자용)**\n"
+                    "- 배포하신 **Streamlit Cloud 관리자 대시보드**로 접속합니다.\n"
+                    "- 배포된 앱 옆의 **Settings(설정) ➡️ Secrets** 항목으로 이동합니다.\n"
+                    "- 아래 스키마를 그대로 복사하여 입력창에 저장(Save)하시면 즉각 영구 고정됩니다!\n"
+                    "```toml\n"
+                    "HF_TOKEN = \"본인의_무료_허깅페이스_토큰\"\n"
+                    "```"
+                )
+            elif "rate" in error_msg.lower() or "429" in error_msg:
                 yield "⏳ 요청이 너무 많습니다. 잠시 후 다시 시도해주세요. (무료 API 제한)"
             else:
                 yield f"⚠️ AI 응답 생성 실패: {error_msg}"
