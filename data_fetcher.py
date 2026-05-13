@@ -5,6 +5,7 @@ yfinance 기반 주식 데이터 수집, 캐싱, 에러 핸들링
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import concurrent.futures
 from datetime import datetime, timedelta
 from config import MARKET_INDICES, INTERVAL_MAP
 
@@ -103,46 +104,69 @@ def get_financial_statements(ticker: str) -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_watchlist_data(tickers: list) -> list:
-    """관심 종목 리스트 데이터 초고속 일괄 수집 (레이트리밋 내성형 배치 모드)"""
+    """관심 종목 리스트 데이터 초고속 일괄 수집 + 시총 정렬 (레이트리밋 내성형 배치 모드)"""
     if not tickers:
         return []
         
     results = []
     ticker_symbols = [item["ticker"] for item in tickers]
     
+    # 1. 시세 병렬 배치 취득 (최신 주가, 변동률, 거래량)
     try:
-        # 1. 단 한 번의 API 쿼리로 모든 주식 데이터를 병렬 배치 취득 (속도 & 차단 방어 극대화)
         df = yf.download(ticker_symbols, period="5d", group_by='ticker', auto_adjust=True, progress=False)
-        
-        # 2. 다중 인덱스 데이터프레임 파싱 및 조립
-        for item in tickers:
-            sym = item["ticker"]
-            try:
-                if sym not in df.columns.get_level_values(0):
-                    continue
-                    
-                # 특정 주식의 시세 히스토리 추출 및 결측치 소거
-                ticker_df = df[sym].dropna(subset=["Close"])
-                if ticker_df.empty:
-                    continue
-                
-                current = float(ticker_df["Close"].iloc[-1])
-                previous = float(ticker_df["Close"].iloc[-2]) if len(ticker_df) >= 2 else current
-                change_pct = ((current - previous) / previous) * 100 if previous != 0 else 0
-                volume = int(ticker_df["Volume"].iloc[-1]) if "Volume" in ticker_df.columns else 0
-                
-                # 필수 실시간 시세 데이터 조립 (info 스크래핑 차단 위험 배제)
-                results.append({
-                    "name": item["name"],
-                    "ticker": sym,
-                    "price": current,
-                    "change_pct": change_pct,
-                    "volume": volume,
-                })
-            except Exception:
-                continue
     except Exception:
-        pass
+        return []
+
+    # 2. 병렬 연산 스레드로 각 종목의 fast_info.market_cap 과 currency 확보 (속도 극대화)
+    market_cap_map = {}
+    currency_map = {}
+    
+    def fetch_fast_info(sym):
+        try:
+            fast = yf.Ticker(sym).fast_info
+            return sym, fast.market_cap, fast.currency
+        except Exception:
+            return sym, 0, ""
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(ticker_symbols), 10)) as executor:
+        future_results = list(executor.map(fetch_fast_info, ticker_symbols))
+        
+    for sym, mcap, cur in future_results:
+        market_cap_map[sym] = mcap or 0
+        currency_map[sym] = cur or ""
+
+    # 3. 다중 인덱스 데이터프레임 파싱 및 조립
+    for item in tickers:
+        sym = item["ticker"]
+        try:
+            if sym not in df.columns.get_level_values(0):
+                continue
+                
+            # 특정 주식의 시세 히스토리 추출 및 결측치 소거
+            ticker_df = df[sym].dropna(subset=["Close"])
+            if ticker_df.empty:
+                continue
+            
+            current = float(ticker_df["Close"].iloc[-1])
+            previous = float(ticker_df["Close"].iloc[-2]) if len(ticker_df) >= 2 else current
+            change_pct = ((current - previous) / previous) * 100 if previous != 0 else 0
+            volume = int(ticker_df["Volume"].iloc[-1]) if "Volume" in ticker_df.columns else 0
+            
+            # 실시간 가격, 거래량에 획득한 시총 및 통화코드 결합
+            results.append({
+                "name": item["name"],
+                "ticker": sym,
+                "price": current,
+                "change_pct": change_pct,
+                "volume": volume,
+                "market_cap": market_cap_map.get(sym, 0),
+                "currency": currency_map.get(sym, ""),
+            })
+        except Exception:
+            continue
+            
+    # 4. 시가총액(market_cap) 기준 실시간 내림차순 완벽 자동 정렬 구현 (요구사항 반영)
+    results.sort(key=lambda x: x["market_cap"], reverse=True)
         
     return results
 

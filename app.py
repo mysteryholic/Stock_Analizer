@@ -459,16 +459,25 @@ def page_dashboard():
 
             if watchlist:
                 import pandas as pd
+                from data_fetcher import format_number
+                
                 df_display = pd.DataFrame(watchlist)
                 df_display["등락률"] = df_display["change_pct"].apply(
                     lambda x: f"{'🟢' if x >= 0 else '🔴'} {x:+.2f}%"
                 )
                 df_display["거래량"] = df_display["volume"].apply(lambda x: f"{x:,.0f}")
+                
+                # 국가별 통화 규격을 반영한 시가총액 시각적 변환 적용
+                df_display["시가총액"] = df_display.apply(
+                    lambda row: format_number(row["market_cap"], row["currency"]), axis=1
+                )
+                
                 df_display = df_display.rename(columns={
                     "name": "종목명", "ticker": "티커", "price": "현재가",
                 })
 
-                display_cols = ["종목명", "티커", "현재가", "등락률", "거래량"]
+                # 시가총액 칼럼 추가 및 배치 
+                display_cols = ["종목명", "티커", "현재가", "등락률", "시가총액", "거래량"]
                 st.dataframe(
                     df_display[display_cols],
                     width="stretch",

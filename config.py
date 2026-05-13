@@ -19,21 +19,37 @@ MARKET_INDICES = {
 # 기본 관심 종목 리스트
 # ──────────────────────────────────────────────
 DEFAULT_WATCHLIST = {
-    "한국 대표": [
+    "한국 🇰🇷": [
         {"ticker": "005930.KS", "name": "삼성전자"},
         {"ticker": "000660.KS", "name": "SK하이닉스"},
         {"ticker": "373220.KS", "name": "LG에너지솔루션"},
+        {"ticker": "005380.KS", "name": "현대차"},
         {"ticker": "035420.KS", "name": "NAVER"},
         {"ticker": "035720.KS", "name": "카카오"},
     ],
-    "미국 대표": [
+    "미국 🇺🇸": [
         {"ticker": "AAPL", "name": "Apple"},
         {"ticker": "MSFT", "name": "Microsoft"},
         {"ticker": "NVDA", "name": "NVIDIA"},
         {"ticker": "TSLA", "name": "Tesla"},
         {"ticker": "GOOGL", "name": "Alphabet"},
         {"ticker": "AMZN", "name": "Amazon"},
+        {"ticker": "META", "name": "Meta"},
     ],
+    "일본 🇯🇵": [
+        {"ticker": "7203.T", "name": "토요타 자동차"},
+        {"ticker": "6758.T", "name": "소니 그룹"},
+        {"ticker": "9984.T", "name": "소프트뱅크 그룹"},
+        {"ticker": "8058.T", "name": "미쓰비시 상사"},
+        {"ticker": "6861.T", "name": "키엔스"},
+    ],
+    "유럽 🇪🇺": [
+        {"ticker": "ASML.AS", "name": "ASML (네덜란드)"},
+        {"ticker": "MC.PA", "name": "LVMH (프랑스)"},
+        {"ticker": "SAP.DE", "name": "SAP (독일)"},
+        {"ticker": "NOVO-B.CO", "name": "노보 노디스크 (덴마크)"},
+        {"ticker": "NESN.SW", "name": "네슬레 (스위스)"},
+    ]
 }
 
 # ──────────────────────────────────────────────
