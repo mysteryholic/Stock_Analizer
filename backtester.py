@@ -21,6 +21,7 @@ class PortfolioBacktester:
         self.end_date = None
         self.initial_capital = BACKTEST_DEFAULTS["initial_capital"]
         self.risk_free_rate = BACKTEST_DEFAULTS["risk_free_rate"]
+        self.cash_weight = 0.0
         self.portfolio_returns = None
         self.portfolio_value = None
         self.benchmark_returns = None
@@ -29,14 +30,42 @@ class PortfolioBacktester:
 
     def set_portfolio(self, tickers: list, weights: list,
                       start_date: str, end_date: str = None,
-                      initial_capital: float = None):
+                      initial_capital: float = None,
+                      cash_weight: float = 0.0):
         """포트폴리오 구성 설정"""
         self.tickers = tickers
-        self.weights = np.array(weights) / np.sum(weights)  # 정규화
+        self.cash_weight = float(cash_weight)
+        
+        # 입력 자산들 가중치 합계 정규화
+        w_array = np.array(weights)
+        sum_w = np.sum(w_array)
+        if sum_w > 0:
+            norm_weights = w_array / sum_w
+        else:
+            norm_weights = w_array
+            
+        # 현금을 뺀 나머지 비율(1.0 - cash_weight) 만큼 축소 할당
+        scaled_sum = 1.0 - self.cash_weight
+        self.weights = norm_weights * scaled_sum
+        
         self.start_date = start_date
         self.end_date = end_date
         if initial_capital:
             self.initial_capital = initial_capital
+
+    def get_allocation_data(self) -> pd.DataFrame:
+        """포트폴리오 최종 자산 배분 현황 데이터프레임 리턴 (현금 포함)"""
+        labels = [str(t) for t in self.tickers]
+        vals = [float(w * 100) for w in self.weights]
+        
+        if self.cash_weight > 0:
+            labels.append("💵 Cash (현금)")
+            vals.append(self.cash_weight * 100)
+            
+        return pd.DataFrame({
+            "자산": labels,
+            "비중 (%)": vals
+        })
 
     @st.cache_data(ttl=600, show_spinner=False)
     def _fetch_data(_self, tickers: tuple, start: str, end: str) -> pd.DataFrame:
@@ -80,10 +109,11 @@ class PortfolioBacktester:
 
         # 포트폴리오 가중 수익률
         if len(self.tickers) == 1:
+            w = self.weights[0]
             if isinstance(daily_returns, pd.DataFrame):
-                self.portfolio_returns = daily_returns.iloc[:, 0]
+                self.portfolio_returns = daily_returns.iloc[:, 0] * w
             else:
-                self.portfolio_returns = daily_returns
+                self.portfolio_returns = daily_returns * w
         else:
             self.portfolio_returns = (daily_returns * self.weights).sum(axis=1)
 

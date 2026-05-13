@@ -809,12 +809,23 @@ def page_backtester():
             st.divider()
             st.caption("💡 **검색 꿀팁**: 한글 종목은 `Samsung`, `Hyundai`, `Kakao`, `Naver` 같은 영문 발음이나 `005930` 처럼 종목번호 숫자로 검색하시면 가장 정확합니다.")
 
+    # 💵 현금 비중 설정
+    st.markdown('<p style="font-weight: 600; font-size: 0.95rem; margin-top: 15px; margin-bottom: 5px;">💵 포트폴리오 현금(Cash) 비중 (%)</p>', unsafe_allow_html=True)
+    cash_pct = st.slider(
+        "현금을 보유하면 남은 비중이 주식 자산군으로 자동 정규화 배정되어 변동성을 완화합니다.", 
+        min_value=0, max_value=100, value=0, step=5, format="%d%%",
+        key="bt_cash_slider"
+    )
+    
+    if cash_pct > 0:
+        st.caption(f"💡 현재 구성: **현금 {cash_pct}%** + **주식 자산군 {100-cash_pct}%** 배정")
+
     # 종목 및 비중 데이터 구성
     tickers = []
     weights = []
 
     if selected_assets:
-        st.markdown('<p style="font-weight: 600; font-size: 0.95rem; margin-top: 10px; margin-bottom: 5px;">⚖️ 종목별 투자 비중 (%)</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-weight: 600; font-size: 0.95rem; margin-top: 10px; margin-bottom: 5px;">⚖️ 주식 자산군 내 상대적 투자 비중 (%)</p>', unsafe_allow_html=True)
         
         # 3열 그리드로 보기 좋게 나열
         grid_cols = st.columns(min(len(selected_assets), 3))
@@ -829,7 +840,7 @@ def page_backtester():
                 ticker = st.session_state.bt_asset_map[asset]
                 tickers.append(ticker)
                 
-                # 기업명 깔끔하게 파싱해 표시 (괄호 전까지만)
+                # 기업명 깔끔하게 파싱해 표시
                 clean_name = asset.split("(")[0].strip()
                 
                 # 개별 비중 입력 위젯
@@ -844,10 +855,8 @@ def page_backtester():
                 total_entered_pct += pct
 
         # 합계 알림 가이드
-        if total_entered_pct != 100:
-            st.info(f"💡 현재 입력 합계: **{total_entered_pct}%** (비율대로 100% 정규화되어 자동 연산됩니다.)")
-        else:
-            st.success(f"✅ 비중 합계가 정확히 **100%** 입니다!")
+        if total_entered_pct > 0:
+            st.success(f"✅ 주식 자산 {len(selected_assets)}개 비중 설정 완료! (입력 합계: {total_entered_pct}%)")
     else:
         st.warning("위의 선택창에서 분석하고자 하는 종목을 한 개 이상 지정해 주세요.")
         return
@@ -886,6 +895,7 @@ def page_backtester():
             tickers, weights,
             str(start_date), str(end_date),
             initial_capital,
+            cash_weight=(cash_pct / 100.0),
         )
 
         with st.spinner("백테스트 실행 중..."):
@@ -898,30 +908,63 @@ def page_backtester():
         # 벤치마크 비교
         bt.compare_benchmark(benchmark_ticker)
 
-        # 핵심 지표
+        # 핵심 지표 및 자산 배분
         st.divider()
-        st.subheader("📊 성과 지표")
-        m = bt.metrics
-        cols = st.columns(4)
-        with cols[0]:
-            st.metric("총 수익률", f"{m['total_return']*100:+.2f}%")
-        with cols[1]:
-            st.metric("연평균 수익률 (CAGR)", f"{m['cagr']*100:+.2f}%")
-        with cols[2]:
-            st.metric("최대 낙폭 (MDD)", f"{m['mdd']*100:.2f}%")
-        with cols[3]:
-            st.metric("샤프 지수", f"{m['sharpe']:.2f}")
-
-        cols2 = st.columns(4)
-        with cols2[0]:
-            st.metric("변동성", f"{m['volatility']*100:.1f}%")
-        with cols2[1]:
-            st.metric("소르티노", f"{m['sortino']:.2f}")
-        with cols2[2]:
-            st.metric("투자 기간", f"{m['years']:.1f}년")
-        with cols2[3]:
-            final_val = bt.portfolio_value.iloc[-1] if bt.portfolio_value is not None else 0
-            st.metric("최종 자산", f"₩{final_val:,.0f}")
+        
+        col_alloc, col_metrics = st.columns([1.0, 3.0], gap="medium")
+        
+        with col_alloc:
+            st.markdown('<p style="font-weight: 600; font-size: 1.05rem; margin-bottom: 10px;">💼 최종 자산 구성</p>', unsafe_allow_html=True)
+            import plotly.express as px
+            alloc_df = bt.get_allocation_data()
+            
+            # 프리미엄 룩 다크 테마 도넛 차트
+            fig_pie = px.pie(
+                alloc_df, names="자산", values="비중 (%)", hole=0.45,
+                color_discrete_sequence=["#3b82f6", "#60a5fa", "#93c5fd", "#2563eb", "#f59e0b", "#10b981"]
+            )
+            fig_pie.update_traces(
+                textposition='inside', 
+                textinfo='percent+label',
+                textfont=dict(color='white', size=10),
+                hoverinfo='label+percent'
+            )
+            fig_pie.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=5, r=5, t=5, b=5),
+                height=240,
+                showlegend=False
+            )
+            st.plotly_chart(fig_pie, width="stretch")
+            
+        with col_metrics:
+            st.markdown('<p style="font-weight: 600; font-size: 1.05rem; margin-bottom: 10px;">📊 핵심 성과 지표</p>', unsafe_allow_html=True)
+            m = bt.metrics
+            
+            cols = st.columns(4)
+            with cols[0]:
+                st.metric("총 수익률", f"{m['total_return']*100:+.2f}%")
+            with cols[1]:
+                st.metric("연평균 수익률 (CAGR)", f"{m['cagr']*100:+.2f}%")
+            with cols[2]:
+                st.metric("최대 낙폭 (MDD)", f"{m['mdd']*100:.2f}%")
+            with cols[3]:
+                st.metric("샤프 지수", f"{m['sharpe']:.2f}")
+    
+            st.markdown("<div style='margin: 15px 0;'></div>", unsafe_allow_html=True)
+    
+            cols2 = st.columns(4)
+            with cols2[0]:
+                st.metric("변동성", f"{m['volatility']*100:.1f}%")
+            with cols2[1]:
+                st.metric("소르티노", f"{m['sortino']:.2f}")
+            with cols2[2]:
+                st.metric("투자 기간", f"{m['years']:.1f}년")
+            with cols2[3]:
+                final_val = bt.portfolio_value.iloc[-1] if bt.portfolio_value is not None else 0
+                st.metric("최종 자산", f"₩{final_val:,.0f}")
 
         st.divider()
 
