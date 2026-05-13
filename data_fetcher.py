@@ -103,34 +103,47 @@ def get_financial_statements(ticker: str) -> dict:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_watchlist_data(tickers: list) -> list:
-    """관심 종목 리스트 데이터 일괄 수집"""
+    """관심 종목 리스트 데이터 초고속 일괄 수집 (레이트리밋 내성형 배치 모드)"""
+    if not tickers:
+        return []
+        
     results = []
-    for item in tickers:
-        try:
-            ticker = item["ticker"]
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d")
-            if hist.empty:
+    ticker_symbols = [item["ticker"] for item in tickers]
+    
+    try:
+        # 1. 단 한 번의 API 쿼리로 모든 주식 데이터를 병렬 배치 취득 (속도 & 차단 방어 극대화)
+        df = yf.download(ticker_symbols, period="5d", group_by='ticker', auto_adjust=True, progress=False)
+        
+        # 2. 다중 인덱스 데이터프레임 파싱 및 조립
+        for item in tickers:
+            sym = item["ticker"]
+            try:
+                if sym not in df.columns.get_level_values(0):
+                    continue
+                    
+                # 특정 주식의 시세 히스토리 추출 및 결측치 소거
+                ticker_df = df[sym].dropna(subset=["Close"])
+                if ticker_df.empty:
+                    continue
+                
+                current = float(ticker_df["Close"].iloc[-1])
+                previous = float(ticker_df["Close"].iloc[-2]) if len(ticker_df) >= 2 else current
+                change_pct = ((current - previous) / previous) * 100 if previous != 0 else 0
+                volume = int(ticker_df["Volume"].iloc[-1]) if "Volume" in ticker_df.columns else 0
+                
+                # 필수 실시간 시세 데이터 조립 (info 스크래핑 차단 위험 배제)
+                results.append({
+                    "name": item["name"],
+                    "ticker": sym,
+                    "price": current,
+                    "change_pct": change_pct,
+                    "volume": volume,
+                })
+            except Exception:
                 continue
-            if hist.columns.nlevels > 1:
-                hist.columns = hist.columns.get_level_values(0)
-            current = float(hist["Close"].iloc[-1])
-            previous = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else current
-            change_pct = ((current - previous) / previous) * 100 if previous != 0 else 0
-            volume = int(hist["Volume"].iloc[-1]) if "Volume" in hist.columns else 0
-            info = stock.info
-            results.append({
-                "name": item["name"],
-                "ticker": ticker,
-                "price": current,
-                "change_pct": change_pct,
-                "volume": volume,
-                "high_52w": info.get("fiftyTwoWeekHigh", None),
-                "low_52w": info.get("fiftyTwoWeekLow", None),
-                "currency": info.get("currency", ""),
-            })
-        except Exception:
-            continue
+    except Exception:
+        pass
+        
     return results
 
 
