@@ -7,4 +7,5 @@ prophet>=1.1.5
 huggingface-hub>=0.23.0
 openai>=1.30.0
 google-generativeai>=0.7.0
+google-genai>=0.1.0
 ta>=0.11.0

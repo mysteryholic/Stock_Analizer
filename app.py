@@ -235,9 +235,22 @@ def render_sidebar():
 
         # 프리미엄 AI 설정
         with st.expander("🔑 AI API 설정"):
-            ai_provider = st.selectbox(
-                "AI 서비스", ["없음 (무료 HF)", "GPT (OpenAI)", "Gemini (Google)"],
-            )
+            # ─── 기본 서비스 자동 세팅 연산 (Secrets 기반) ───
+            provider_opts = ["없음 (무료 HF)", "GPT (OpenAI)", "Gemini (Google)"]
+            def_idx = 0
+            
+            if "ai_provider" in st.session_state:
+                try: def_idx = provider_opts.index(st.session_state["ai_provider"])
+                except: pass
+            else:
+                try:
+                    if st.secrets.get("OPENAI_API_KEY"):
+                        def_idx = 1
+                    elif st.secrets.get("GEMINI_API_KEY"):
+                        def_idx = 2
+                except: pass
+
+            ai_provider = st.selectbox("AI 서비스", provider_opts, index=def_idx)
             # ────── 기본 입력값 자동 링킹 (SessionState or Secrets) ──────
             def_hf = st.session_state.get("hf_token", "")
             if not def_hf:
@@ -561,7 +574,16 @@ def page_ai_analyst(ticker_input: str):
         st.markdown(render_badge("PREMIUM", "premium"), unsafe_allow_html=True)
     else:
         st.markdown(render_badge("FREE", "free"), unsafe_allow_html=True)
-        st.caption("💡 사이드바에서 GPT/Gemini API 키를 입력하면 심층 분석 기능이 활성화됩니다.")
+        
+        # 라이브러리 로드 에러 검출 및 렌더링
+        init_err = st.session_state.get("ai_init_error")
+        if init_err:
+            st.error(f"⚠️ **프리미엄 AI 활성화 오류 감지**\n\n`{init_err}`")
+            st.warning("💡 **해결 안내:**\n"
+                       "1. `google-genai` 등 최근 업데이트된 패키지가 서버(웹 사이트) 환경에 아직 설치되지 않았을 확률이 99%입니다.\n"
+                       "2. 로컬의 최신 `requirements.txt` 파일을 배포 서버에 **Git Commit & Push**해 주신 후, **앱을 Reboot(재부팅)**하시면 즉시 해결됩니다!")
+        else:
+            st.caption("💡 사이드바에서 GPT/Gemini API 키를 입력하면 심층 분석 기능이 활성화됩니다.")
 
     # 프리미엄 전용: 재무 분석 탭
     if tier == "premium":

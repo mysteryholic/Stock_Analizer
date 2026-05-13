@@ -98,6 +98,10 @@ class PremiumAIAgent:
 
     def _init_client(self):
         """API 클라이언트 초기화"""
+        # 이전 오류 정보 청소
+        if "ai_init_error" in st.session_state:
+            st.session_state["ai_init_error"] = None
+            
         try:
             if self.provider == "gpt":
                 from openai import OpenAI
@@ -110,8 +114,10 @@ class PremiumAIAgent:
                     self.model = "gemini-2.5-flash"
                 # 신규 google-genai SDK 클라이언트 객체 생성
                 self.client = genai.Client(api_key=self.api_key)
-        except Exception:
+        except Exception as e:
             self.client = None
+            # 유저 디버깅을 위해 상세 예외 메시지를 세션 상태로 전송
+            st.session_state["ai_init_error"] = f"[{self.provider.upper()} 라이브러리 로드 실패] {str(e)}"
 
     def chat(self, messages: list, stream: bool = True):
         """채팅 응답 생성"""
