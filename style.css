@@ -1,0 +1,265 @@
+/* ═══════════════════════════════════════════
+   StockInsight Omni - Master Stylesheet
+   글로벌 폰트, 카드, 반응형 레이아웃
+   ═══════════════════════════════════════════ */
+
+html, body, [class*="css"] {
+    font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.main .block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
+    max-width: 1400px;
+}
+
+/* ─── 사이드바 ─── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d1233 0%, #0a0e27 100%);
+    border-right: 1px solid rgba(56, 97, 251, 0.15);
+}
+
+section[data-testid="stSidebar"] .stRadio > label {
+    font-weight: 500; color: #8b92a5;
+    letter-spacing: 0.5px; text-transform: uppercase; font-size: 0.7rem;
+}
+
+section[data-testid="stSidebar"] .stRadio > div > label {
+    padding: 0.6rem 1rem; border-radius: 10px;
+    transition: all 0.3s ease; margin-bottom: 2px;
+}
+
+section[data-testid="stSidebar"] .stRadio > div > label:hover {
+    background: rgba(56, 97, 251, 0.12);
+}
+
+/* ─── 메트릭 카드 ─── */
+[data-testid="stMetric"] {
+    background: linear-gradient(135deg, rgba(18,22,56,0.9), rgba(13,18,51,0.95));
+    border: 1px solid rgba(56,97,251,0.12);
+    border-radius: 16px; padding: 1.2rem 1.4rem;
+    transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+}
+
+[data-testid="stMetric"]:hover {
+    border-color: rgba(56,97,251,0.35);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 32px rgba(56,97,251,0.12);
+}
+
+[data-testid="stMetricLabel"] { font-size: 0.8rem; font-weight: 600; color: #8b92a5; }
+[data-testid="stMetricValue"] { font-size: 1.5rem; font-weight: 700; color: #e8eaed; }
+[data-testid="stMetricDelta"] svg { display: none; }
+
+/* ─── 버튼 ─── */
+.stButton > button {
+    background: linear-gradient(135deg, #3861fb, #5b7cfd);
+    color: white; border: none; border-radius: 12px;
+    padding: 0.55rem 1.8rem; font-weight: 600; font-size: 0.88rem;
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 4px 16px rgba(56,97,251,0.25);
+}
+
+.stButton > button:hover {
+    background: linear-gradient(135deg, #2d50e6, #4a6bf5);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(56,97,251,0.4);
+}
+
+.stButton > button:active { transform: translateY(0); }
+
+/* ─── 탭 ─── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px; background: rgba(18,22,56,0.5);
+    border-radius: 14px; padding: 4px;
+    border: 1px solid rgba(56,97,251,0.1);
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 10px; padding: 0.5rem 1.2rem;
+    font-weight: 500; color: #8b92a5; transition: all 0.25s ease;
+}
+
+.stTabs [data-baseweb="tab"]:hover { color: #e8eaed; background: rgba(56,97,251,0.08); }
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, rgba(56,97,251,0.2), rgba(139,92,246,0.15)) !important;
+    color: #e8eaed !important; font-weight: 600;
+}
+
+.stTabs [data-baseweb="tab-highlight"] { background: transparent !important; }
+
+/* ─── 입력 필드 ─── */
+.stTextInput > div > div > input,
+.stSelectbox > div > div,
+.stMultiSelect > div > div {
+    background: rgba(18,22,56,0.8);
+    border: 1px solid rgba(56,97,251,0.15);
+    border-radius: 10px; color: #e8eaed;
+    transition: border-color 0.25s ease;
+}
+
+.stTextInput > div > div > input:focus {
+    border-color: #3861fb;
+    box-shadow: 0 0 0 2px rgba(56,97,251,0.15);
+}
+
+/* ─── 채팅 ─── */
+[data-testid="stChatMessage"] {
+    background: rgba(18,22,56,0.6);
+    border: 1px solid rgba(56,97,251,0.08);
+    border-radius: 16px; padding: 1rem 1.2rem; margin-bottom: 0.5rem;
+}
+
+/* ─── 데이터프레임 ─── */
+[data-testid="stDataFrame"] {
+    border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(56,97,251,0.1);
+}
+
+/* ─── 커스텀 카드 ─── */
+.stock-card {
+    background: linear-gradient(135deg, rgba(18,22,56,0.9), rgba(13,18,51,0.95));
+    border: 1px solid rgba(56,97,251,0.12); border-radius: 16px;
+    padding: 1.5rem; margin-bottom: 1rem;
+    transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+
+.stock-card:hover {
+    border-color: rgba(56,97,251,0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+
+.card-title {
+    font-size: 0.75rem; font-weight: 600; color: #8b92a5;
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem;
+}
+
+.card-value { font-size: 1.6rem; font-weight: 700; color: #e8eaed; line-height: 1.2; }
+.card-delta { font-size: 0.9rem; font-weight: 600; margin-top: 0.3rem; }
+.delta-positive { color: #00d4aa; }
+.delta-negative { color: #ff4757; }
+.glow-positive { box-shadow: 0 0 20px rgba(0,212,170,0.08); border-color: rgba(0,212,170,0.2); }
+.glow-negative { box-shadow: 0 0 20px rgba(255,71,87,0.08); border-color: rgba(255,71,87,0.2); }
+
+/* ─── 페이지 헤더 ─── */
+.page-header {
+    background: linear-gradient(135deg, rgba(56,97,251,0.08), rgba(139,92,246,0.05));
+    border: 1px solid rgba(56,97,251,0.1);
+    border-radius: 20px; padding: 1.5rem 2rem; margin-bottom: 2rem;
+}
+
+.page-header h1 {
+    font-size: 1.8rem; font-weight: 800;
+    background: linear-gradient(135deg, #3861fb, #8b5cf6);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; margin: 0;
+}
+
+.page-header p { color: #8b92a5; font-size: 0.9rem; margin: 0.3rem 0 0 0; }
+
+hr { border-color: rgba(56,97,251,0.1); margin: 1.5rem 0; }
+
+/* ─── 스크롤바 ─── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a0e27; }
+::-webkit-scrollbar-thumb { background: rgba(56,97,251,0.3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(56,97,251,0.5); }
+
+/* ─── 배지 ─── */
+.badge {
+    display: inline-block; padding: 0.2rem 0.6rem;
+    border-radius: 20px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.5px;
+}
+
+.badge-free { background: rgba(0,212,170,0.15); color: #00d4aa; border: 1px solid rgba(0,212,170,0.3); }
+
+.badge-premium {
+    background: linear-gradient(135deg, rgba(240,185,11,0.15), rgba(240,185,11,0.08));
+    color: #f0b90b; border: 1px solid rgba(240,185,11,0.3);
+}
+
+/* ─── 면책 조항 ─── */
+.disclaimer {
+    background: rgba(255,71,87,0.06);
+    border: 1px solid rgba(255,71,87,0.15);
+    border-radius: 12px; padding: 0.8rem 1.2rem;
+    font-size: 0.75rem; color: #8b92a5; line-height: 1.5;
+}
+
+/* ─── 애니메이션 ─── */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.animate-fade-in { animation: fadeInUp 0.5s ease-out; }
+
+.live-indicator {
+    display: inline-block; width: 8px; height: 8px;
+    background: #00d4aa; border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+    margin-right: 6px; vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════
+   반응형: 태블릿 (768~1023px)
+   ═══════════════════════════════════════════ */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .main .block-container { padding: 1rem 1.5rem; max-width: 100%; }
+    [data-testid="stMetricValue"] { font-size: 1.3rem; }
+    .page-header h1 { font-size: 1.5rem; }
+    .card-value { font-size: 1.3rem; }
+}
+
+/* ═══════════════════════════════════════════
+   반응형: 모바일 / 아이폰 (767px 이하)
+   ═══════════════════════════════════════════ */
+@media (max-width: 767px) {
+    .main .block-container { padding: 0.5rem 0.8rem; max-width: 100%; }
+
+    [data-testid="column"] {
+        width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important;
+    }
+
+    [data-testid="stMetric"] { padding: 0.8rem 1rem; border-radius: 12px; }
+    [data-testid="stMetricLabel"] { font-size: 0.7rem; }
+    [data-testid="stMetricValue"] { font-size: 1.15rem; }
+
+    .stButton > button {
+        width: 100%; padding: 0.65rem 1rem;
+        font-size: 0.95rem; border-radius: 10px;
+    }
+
+    .page-header { padding: 1rem 1.2rem; border-radius: 14px; margin-bottom: 1rem; }
+    .page-header h1 { font-size: 1.3rem; }
+    .page-header p { font-size: 0.8rem; }
+
+    .stock-card { padding: 1rem; border-radius: 12px; margin-bottom: 0.7rem; }
+    .card-value { font-size: 1.3rem; }
+    .card-title { font-size: 0.65rem; }
+
+    section[data-testid="stSidebar"] {
+        min-width: 260px !important; max-width: 260px !important;
+    }
+
+    .stTabs [data-baseweb="tab"] { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+
+    [data-testid="stChatMessage"] { padding: 0.7rem 0.9rem; border-radius: 12px; }
+}
+
+/* ─── 아이폰 SE (375px 이하) ─── */
+@media (max-width: 375px) {
+    .main .block-container { padding: 0.3rem 0.5rem; }
+    [data-testid="stMetricValue"] { font-size: 1rem; }
+    .page-header h1 { font-size: 1.1rem; }
+    .card-value { font-size: 1.1rem; }
+}
