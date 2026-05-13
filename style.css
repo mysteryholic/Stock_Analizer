@@ -254,6 +254,20 @@ hr { border-color: rgba(56,97,251,0.1); margin: 1.5rem 0; }
     .stTabs [data-baseweb="tab"] { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
 
     [data-testid="stChatMessage"] { padding: 0.7rem 0.9rem; border-radius: 12px; }
+
+    .hide-mobile { display: none !important; }
+}
+
+/* ─── My Watchlist 카드 ─── */
+.wl-card {
+    min-width: 140px;
+    text-align: center;
+}
+
+/* ─── 관심종목 해제 버튼 (❌) 모바일 터치 사이즈 ─── */
+[data-testid="stButton"] button[kind="secondary"] {
+    min-height: 44px;  /* Apple HIG 최소 터치 타겟 */
+    min-width: 44px;
 }
 
 /* ─── 아이폰 SE (375px 이하) ─── */

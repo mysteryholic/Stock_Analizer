@@ -27,6 +27,142 @@ inject_custom_css()
 
 
 # ══════════════════════════════════════════════
+# 공용 컴포넌트
+# ══════════════════════════════════════════════
+import json, os
+
+WATCHLIST_PATH = os.path.join(os.path.dirname(__file__), "watchlist.json")
+
+def load_my_watchlist() -> list:
+    """JSON 파일에서 관심 종목 리스트 로드"""
+    try:
+        if os.path.exists(WATCHLIST_PATH):
+            with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def save_my_watchlist(wl: list):
+    """관심 종목 리스트를 JSON 파일에 저장"""
+    try:
+        with open(WATCHLIST_PATH, "w", encoding="utf-8") as f:
+            json.dump(wl, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def init_watchlist_state():
+    """세션 상태의 관심 종목 리스트를 초기화 (파일 우선)"""
+    if "my_watchlist" not in st.session_state:
+        st.session_state.my_watchlist = load_my_watchlist()
+
+def add_to_watchlist(ticker: str, name: str = ""):
+    init_watchlist_state()
+    entry = {"ticker": ticker, "name": name or ticker}
+    if not any(e["ticker"] == ticker for e in st.session_state.my_watchlist):
+        st.session_state.my_watchlist.append(entry)
+        save_my_watchlist(st.session_state.my_watchlist)
+
+def remove_from_watchlist(ticker: str):
+    init_watchlist_state()
+    st.session_state.my_watchlist = [
+        e for e in st.session_state.my_watchlist if e["ticker"] != ticker
+    ]
+    save_my_watchlist(st.session_state.my_watchlist)
+
+
+def render_stock_selector(label: str, key_prefix: str, default_ticker: str = "AAPL") -> str:
+    """실시간 글로벌 종목 검색창(엔터 지원)이 결합된 다기능 종목 선택 패널"""
+    # 1. 세션 변수 초기화 (글로벌 공유 티커와 정적 매핑)
+    session_key = f"ss_ticker_{key_prefix}"
+    global_val = st.session_state.get("global_ticker", "")
+    if session_key not in st.session_state:
+        st.session_state[session_key] = global_val or default_ticker
+    elif global_val and global_val != st.session_state[session_key]:
+        st.session_state[session_key] = global_val
+
+    # 2. 검색 리스트 임시 저장용 캐시 키 확보
+    cache_key = f"res_cache_{key_prefix}"
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = None
+
+    # 3. UI 폼 렌더링 (입력창 + 검색 버튼)
+    with st.form(f"form_sel_{key_prefix}", border=False):
+        col_inp, col_btn = st.columns([3, 1])
+        with col_inp:
+            query_val = st.text_input(
+                label,
+                value=st.session_state[session_key],
+                placeholder="종목코드 직접 입력 또는 기업명 검색 (엔터키 지원)",
+                key=f"f_inp_{key_prefix}"
+            )
+        with col_btn:
+            st.markdown('<div style="height: 28px;" class="hide-mobile"></div>', unsafe_allow_html=True)
+            submitted = st.form_submit_button("🔍 종목 조회", width="stretch")
+
+    # 4. 제출 이벤트 처리 (엔터 클릭 또는 버튼 클릭)
+    if submitted and query_val:
+        import yfinance as yf
+        q = query_val.strip().upper()
+        try:
+            with st.spinner("정보 검색 중..."):
+                res = yf.Search(q, max_results=4)
+            if res and res.quotes:
+                top_sym = res.quotes[0].get("symbol", "").upper()
+                # 사용자가 입력한 값이 첫 번째 검색 결과의 티커명과 완벽히 일치할 때 → 즉시 통과/선택
+                if q == top_sym:
+                    st.session_state[session_key] = top_sym
+                    st.session_state["global_ticker"] = top_sym
+                    st.session_state[cache_key] = None # 이전 검색 찌꺼기 소거
+                    st.toast(f"✅ {top_sym} 종목이 활성화되었습니다!")
+                    st.rerun()
+                else:
+                    # 사명(예: Tesla) 또는 유사어 검색일 때 → 추천 목록 화면 바인딩
+                    st.session_state[cache_key] = [
+                        {
+                            "symbol": quote.get("symbol"),
+                            "name": quote.get("shortname") or quote.get("longname") or "이름없음",
+                            "exchange": quote.get("exchange", "N/A")
+                        }
+                        for quote in res.quotes
+                    ]
+            else:
+                # 검색 불가 시 사용자가 입력한 값을 티커로 단독 밀어넣기 시도
+                st.session_state[session_key] = q
+                st.session_state["global_ticker"] = q
+                st.session_state[cache_key] = None
+                st.rerun()
+        except Exception:
+            # Yahoo API 타임아웃 등 발생 시 대체 통과
+            st.session_state[session_key] = q
+            st.session_state["global_ticker"] = q
+            st.session_state[cache_key] = None
+            st.rerun()
+
+    # 5. 추천 검색 리스트 동적 팝아웃 생성
+    if st.session_state[cache_key]:
+        st.markdown("**💡 검색 추천 목록 (분석할 종목을 적용해 보세요):**")
+        for item in st.session_state[cache_key]:
+            sym = item["symbol"]
+            nm = item["name"][:17] + ".." if len(item["name"]) > 19 else item["name"]
+            ex = item["exchange"]
+            
+            r_c1, r_c2 = st.columns([3, 1])
+            with r_c1:
+                st.markdown(f"📌 `{sym}` &nbsp; **{nm}** &nbsp; <span style='color:#8b92a5; font-size:0.75rem;'>[{ex}]</span>", unsafe_allow_html=True)
+            with r_c2:
+                if st.button("📊 분석 적용", key=f"btn_apply_{key_prefix}_{sym}", width="stretch"):
+                    st.session_state[session_key] = sym
+                    st.session_state["global_ticker"] = sym
+                    st.session_state[cache_key] = None # 선택 시 가시성 제거
+                    st.toast(f"✅ {sym} ({nm}) 종목으로 분석을 가동합니다!")
+                    st.rerun()
+        st.divider()
+
+    return st.session_state[session_key]
+
+
+# ══════════════════════════════════════════════
 # 사이드바
 # ══════════════════════════════════════════════
 def render_sidebar():
@@ -57,37 +193,101 @@ def render_sidebar():
 
         st.divider()
 
-        # 종목 검색
+        # 종목 검색 (사이드바 — 글로벌 티커 설정)
         st.markdown('<p style="font-size:0.7rem; color:#8b92a5; font-weight:600; letter-spacing:0.5px;">🔍 종목 검색</p>', unsafe_allow_html=True)
-        ticker_input = st.text_input(
-            "종목 코드 입력", value="", placeholder="예: AAPL, 005930.KS",
-            label_visibility="collapsed",
-        )
+        search_col, pop_col = st.columns([3, 1])
+        with search_col:
+            ticker_input = st.text_input(
+                "종목 코드 입력", value=st.session_state.get("global_ticker", ""),
+                placeholder="예: AAPL, 005930.KS",
+                label_visibility="collapsed",
+                key="sidebar_ticker_input",
+            )
+            if ticker_input:
+                st.session_state["global_ticker"] = ticker_input.strip().upper()
+        with pop_col:
+            with st.popover("🔍", width="stretch"):
+                st.caption("기업명으로 실시간 검색")
+                sb_search = st.text_input(
+                    "사이드바 검색",
+                    placeholder="Tesla, Samsung…",
+                    key="sb_search_q",
+                    label_visibility="collapsed",
+                )
+                if sb_search:
+                    import yfinance as yf
+                    try:
+                        with st.spinner("조회 중..."):
+                            r = yf.Search(sb_search.strip(), max_results=5)
+                        if r and r.quotes:
+                            for q in r.quotes:
+                                sym = q.get("symbol")
+                                nm = (q.get("shortname") or q.get("longname") or "")[:14]
+                                if st.button(f"{sym} | {nm}", key=f"sb_pop_{sym}", width="stretch"):
+                                    st.session_state["global_ticker"] = sym
+                                    st.toast(f"✅ {sym} 적용!")
+                                    st.rerun()
+                        else:
+                            st.caption("결과 없음")
+                    except Exception:
+                        st.caption("검색 오류")
+                st.caption("💡 Samsung, Kakao, 005930…")
 
         # 프리미엄 AI 설정
         with st.expander("🔑 AI API 설정"):
             ai_provider = st.selectbox(
                 "AI 서비스", ["없음 (무료 HF)", "GPT (OpenAI)", "Gemini (Google)"],
             )
+            # ────── 기본 입력값 자동 링킹 (SessionState or Secrets) ──────
+            def_hf = st.session_state.get("hf_token", "")
+            if not def_hf:
+                try: def_hf = st.secrets.get("HF_TOKEN", "")
+                except: pass
+
+            def_api = st.session_state.get("api_key", "")
+            if not def_api:
+                try:
+                    if "GPT" in ai_provider: def_api = st.secrets.get("OPENAI_API_KEY", "")
+                    elif "Gemini" in ai_provider: def_api = st.secrets.get("GEMINI_API_KEY", "")
+                except: pass
+
+            hf_token = ""
             api_key = ""
             ai_model = None
-            if ai_provider != "없음 (무료 HF)":
+            
+            if ai_provider == "없음 (무료 HF)":
+                st.caption("🆓 최상급 오픈소스 한국어 AI(Qwen 2.5)를 가동합니다. 무상 발급받은 허깅페이스 토큰을 입력해 주세요.")
+                hf_token = st.text_input(
+                    "HF Access Token", type="password", placeholder="hf_...",
+                    value=def_hf, key="ti_hf_sidebar"
+                )
+            else:
                 api_key = st.text_input(
                     "API Key", type="password", placeholder="sk-... 또는 AI...",
+                    value=def_api, key="ti_api_sidebar"
                 )
                 if "GPT" in ai_provider:
-                    ai_model = st.selectbox("모델", AI_MODELS["gpt"]["models"])
+                    sel_model = st.selectbox("모델", AI_MODELS["gpt"]["models"])
+                    if sel_model == "직접 입력 (Custom)":
+                        ai_model = st.text_input("GPT 모델명 입력", placeholder="예: gpt-4.5-preview")
+                    else:
+                        ai_model = sel_model
                 elif "Gemini" in ai_provider:
-                    ai_model = st.selectbox("모델", AI_MODELS["gemini"]["models"])
+                    sel_model = st.selectbox("모델", AI_MODELS["gemini"]["models"])
+                    if sel_model == "직접 입력 (Custom)":
+                        ai_model = st.text_input("Gemini 모델명 입력", placeholder="예: gemini-2.5-pro")
+                    else:
+                        ai_model = sel_model
 
             st.session_state["ai_provider"] = ai_provider
             st.session_state["api_key"] = api_key
             st.session_state["ai_model"] = ai_model
+            st.session_state["hf_token"] = hf_token
 
         st.divider()
         render_disclaimer()
 
-    return page, ticker_input
+    return page, st.session_state.get("global_ticker", ticker_input)
 
 
 # ══════════════════════════════════════════════
@@ -98,12 +298,123 @@ def page_dashboard():
     from data_fetcher import get_market_indices, get_watchlist_data, format_price
     from styles import render_live_indicator
 
+    init_watchlist_state()
+
     render_page_header(
         "📊 시장 대시보드",
         f'{render_live_indicator()} 주요 시장 지수 및 관심 종목 현황'
     )
 
-    # 시장 지수 카드
+    # ── 종목 검색 바 (대시보드 전용) ──────────────────────
+    st.markdown("##### 🔍 종목 검색")
+    
+    # 검색 결과 유지를 위한 세션 상태 관리
+    if "dash_search_results" not in st.session_state:
+        st.session_state.dash_search_results = None
+
+    # st.form을 도입하여 '엔터키' 지원 + 레이아웃 자동 균형
+    with st.form("dash_search_form", border=False):
+        dash_col1, dash_col2 = st.columns([4, 1])
+        with dash_col1:
+            dash_search_q = st.text_input(
+                "대시보드 검색", placeholder="기업명 또는 티커: Tesla, Samsung, AAPL… (엔터 가능)",
+                label_visibility="collapsed", key="dash_search_q"
+            )
+        with dash_col2:
+            submitted = st.form_submit_button("🔍 검색", width="stretch")
+
+    # 폼이 제출되었을 때만 Yahoo DB 검색 1회 실행 후 세션에 캐시
+    if submitted and dash_search_q:
+        import yfinance as yf
+        try:
+            with st.spinner("검색 중..."):
+                res = yf.Search(dash_search_q.strip(), max_results=5)
+            if res and res.quotes:
+                st.session_state.dash_search_results = [
+                    {
+                        "symbol": q.get("symbol"),
+                        "name": q.get("shortname") or q.get("longname") or q.get("symbol"),
+                        "exchange": q.get("exchange", "N/A")
+                    }
+                    for q in res.quotes
+                ]
+            else:
+                st.session_state.dash_search_results = []
+                st.warning("🔍 검색 결과가 없습니다. 영문 사명이나 티커 번호로 시도해보세요.")
+        except Exception as e:
+            st.error(f"⚠️ 검색 오류: {str(e)}")
+            st.session_state.dash_search_results = None
+
+    # 세션에 보관된 검색 결과를 렌더링 (관심 등록/해제 등의 재실행(rerun) 시에도 온전히 화면에 유지됨)
+    if st.session_state.dash_search_results:
+        st.markdown("**📋 검색 결과 — ⭐ 버튼으로 관심 등록 가능:**")
+        for q in st.session_state.dash_search_results:
+            sym = q["symbol"]
+            nm = q["name"]
+            ex = q["exchange"]
+            in_wl = any(e["ticker"] == sym for e in st.session_state.my_watchlist)
+
+            r1, r2, r3 = st.columns([3, 1, 1])
+            with r1:
+                st.markdown(f"**{nm}** &nbsp;&nbsp; `{sym}` &nbsp; [{ex}]")
+            with r2:
+                if in_wl:
+                    if st.button("❌ 해제", key=f"wl_remove_{sym}", width="stretch"):
+                        remove_from_watchlist(sym)
+                        st.toast(f"❌ {sym} 관심 해제 완료")
+                        st.rerun()
+                else:
+                    if st.button("⭐ 등록", key=f"wl_add_{sym}", width="stretch"):
+                        add_to_watchlist(sym, nm)
+                        st.toast(f"⭐ {sym} 관심 등록 완료!")
+                        st.rerun()
+            with r3:
+                if st.button("📈 분석", key=f"wl_go_{sym}", width="stretch"):
+                    st.session_state["global_ticker"] = sym
+                    st.toast(f"✅ {sym} 분석 페이지 연동!")
+
+    st.divider()
+
+    # ── My Watchlist 섹션 ─────────────────────────────
+    my_wl = st.session_state.my_watchlist
+    if my_wl:
+        st.markdown("#### ⭐ My Watchlist")
+        with st.spinner("관심 종목 데이터 로딩..."):
+            wl_data_map = {d["ticker"]: d for d in get_watchlist_data(my_wl)}
+
+        # 가로형 카드 레이아웃 (최대 4열)
+        n_cols = min(len(my_wl), 4)
+        wl_cols = st.columns(n_cols)
+        for i, entry in enumerate(my_wl):
+            sym = entry["ticker"]
+            nm = entry.get("name", sym)
+            d = wl_data_map.get(sym, {})
+            price = d.get("price", 0)
+            chg_pct = d.get("change_pct", 0)
+            arrow = "🟢" if chg_pct >= 0 else "🔴"
+            with wl_cols[i % n_cols]:
+                st.markdown(
+                    f"""
+                    <div class="stock-card wl-card">
+                        <div class="card-title">{sym}</div>
+                        <div class="card-value">{f"{price:,.2f}" if price else "N/A"}</div>
+                        <div class="card-delta {'delta-positive' if chg_pct >= 0 else 'delta-negative'}">
+                            {arrow} {chg_pct:+.2f}%
+                        </div>
+                        <div style="font-size:0.65rem; color:#8b92a5; margin-top:4px;">{nm[:18]}</div>
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+                if st.button("❌", key=f"wl_card_rm_{sym}", help=f"{sym} 관심 해제"):
+                    remove_from_watchlist(sym)
+                    st.rerun()
+
+        st.divider()
+    else:
+        st.info("⭐ 관심 종목이 없습니다. 위 검색창에서 종목을 검색 후 등록해 보세요!")
+        st.divider()
+
+    # ── 시장 지수 카드 ─────────────────────────────────
     with st.spinner("시장 데이터 로딩 중..."):
         indices = get_market_indices()
 
@@ -122,8 +433,8 @@ def page_dashboard():
 
     st.divider()
 
-    # 관심 종목
-    st.subheader("⭐ 관심 종목")
+    # ── 프리셋 관심 종목 (탭) ──────────────────────────
+    st.subheader("📋 시장별 종목 현황")
 
     tab_labels = list(DEFAULT_WATCHLIST.keys())
     tabs = st.tabs(tab_labels)
@@ -167,13 +478,10 @@ def page_technical(ticker_input: str):
 
     render_page_header("📈 기술적 분석", "캔들스틱 차트, 이동평균선, RSI, MACD 지표")
 
-    # 종목 선택
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        ticker = st.text_input(
-            "종목 코드", value=ticker_input or "AAPL",
-            key="tech_ticker", placeholder="예: AAPL, MSFT, 005930.KS",
-        )
+    # 종목 선택기
+    ticker = render_stock_selector("📊 분석할 종목 선택", "tech", default_ticker=ticker_input or "AAPL")
+
+    col2, col3 = st.columns(2)
     with col2:
         period_label = st.selectbox("기간", list(PERIOD_OPTIONS.keys()), index=3)
         period = PERIOD_OPTIONS[period_label]
@@ -206,7 +514,8 @@ def page_technical(ticker_input: str):
                 st.metric("PER", f"{per:.2f}" if per else "N/A")
             with cols[3]:
                 dy = info.get("dividend_yield")
-                st.metric("배당수익률", f"{dy*100:.2f}%" if dy else "N/A")
+                # yfinance의 dividend_yield는 이미 퍼센트 단위 수치(예: 2.5)로 전달됩니다.
+                st.metric("배당수익률", f"{dy:.2f}%" if dy else "N/A")
 
         st.divider()
 
@@ -289,11 +598,8 @@ def page_ai_analyst(ticker_input: str):
         with tab_analysis:
             from data_fetcher import get_stock_info, get_financial_statements
 
-            analysis_ticker = st.text_input(
-                "분석할 종목", value=ticker_input or "AAPL",
-                key="analysis_ticker",
-            )
-            if st.button("🔍 AI 재무 분석 시작", key="btn_analysis"):
+            analysis_ticker = render_stock_selector("📊 분석할 종목 선택", "analysis", default_ticker=ticker_input or "AAPL")
+            if st.button("🤖 AI 심층 재무 분석 시작", key="btn_analysis", width="stretch"):
                 with st.spinner("재무 데이터 수집 중..."):
                     info = get_stock_info(analysis_ticker)
                     financials = get_financial_statements(analysis_ticker)
@@ -316,12 +622,10 @@ def page_ai_prediction(ticker_input: str):
 
     render_page_header("🔮 AI 주가 예측", "Prophet 모델 기반 과거 패턴 분석 및 미래 예측")
 
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        ticker = st.text_input(
-            "예측할 종목", value=ticker_input or "AAPL",
-            key="pred_ticker",
-        )
+    # 종목 선택기
+    ticker = render_stock_selector("📊 예측할 종목 선택", "pred", default_ticker=ticker_input or "AAPL")
+
+    col2, col3 = st.columns(2)
     with col2:
         data_period = st.selectbox("학습 데이터 기간", ["2y", "5y", "max"], index=1)
     with col3:
@@ -597,13 +901,16 @@ def page_settings():
     provider = st.session_state.get("ai_provider", "없음")
     api_key = st.session_state.get("api_key", "")
 
-    # Hugging Face 토큰 검출 안전 장치 (secrets.toml 부재 에러 방지)
+    # Hugging Face 토큰 검출 안전 장치 (세션 상태 또는 secrets.toml)
     hf_active = False
-    try:
-        if "HF_TOKEN" in st.secrets and st.secrets["HF_TOKEN"]:
-            hf_active = True
-    except Exception:
-        pass
+    if st.session_state.get("hf_token", ""):
+        hf_active = True
+    else:
+        try:
+            if "HF_TOKEN" in st.secrets and st.secrets["HF_TOKEN"]:
+                hf_active = True
+        except Exception:
+            pass
 
     cols = st.columns(3)
     with cols[0]:

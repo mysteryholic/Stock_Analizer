@@ -103,15 +103,19 @@ COLORS = {
 # ──────────────────────────────────────────────
 AI_MODELS = {
     "huggingface": {
-        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
         "display_name": "🆓 AI 어시스턴트 (무료)",
     },
     "gpt": {
-        "models": ["gpt-5", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+        "models": ["gpt-5", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "직접 입력 (Custom)"],
         "display_name": "⭐ GPT (프리미엄)",
     },
     "gemini": {
-        "models": ["gemini-3.1-pro", "gemini-3.0-flash"],
+        "models": [
+            "gemini-2.5-flash", "gemini-2.5-pro", 
+            "gemini-1.5-flash", "gemini-1.5-pro",
+            "gemini-3.1-flash", "직접 입력 (Custom)"
+        ],
         "display_name": "⭐ Gemini (프리미엄)",
     },
 }

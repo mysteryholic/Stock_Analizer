@@ -18,18 +18,28 @@ class HuggingFaceAgent:
         """HF InferenceClient 초기화"""
         try:
             from huggingface_hub import InferenceClient
-            token = st.secrets.get("HF_TOKEN", "")
+            # 세션 상태 또는 secrets로부터 토큰 확보
+            token = st.session_state.get("hf_token", "") or st.secrets.get("HF_TOKEN", "")
             if token:
                 self.client = InferenceClient(api_key=token)
             else:
-                self.client = InferenceClient()
+                # 최신 2026 SDK 정책 상 비인증 호출이 거부되므로, 토큰 없을 시 None 처리
+                self.client = None
         except Exception:
             self.client = None
 
     def chat(self, messages: list, stream: bool = True):
         """채팅 응답 생성"""
         if not self.client:
-            yield "⚠️ Hugging Face 연결에 실패했습니다. HF_TOKEN을 확인해주세요."
+            yield (
+                "### ⚠️ 무료 AI 가동을 위한 10초 연동 안내 🤖\n\n"
+                "최신 AI 연동 엔진 정책 강화로 인해, **100% 무상 발급** 가능한 전용 키(Access Token) 입력이 필수가 되었습니다.\n\n"
+                "간단히 아래 순서로 발급받아 적용해 주세요:\n\n"
+                "1. **[huggingface.co/join](https://huggingface.co/join)** 에 접속하여 무료 이메일 회원 가입을 합니다.\n"
+                "2. 로그인 후 **[설정 ➡️ Access Tokens](https://huggingface.co/settings/tokens)** 페이지로 들어갑니다.\n"
+                "3. **Create new token** 버튼을 클릭한 뒤, `Read` 권한을 부여하여 무상 키를 생성합니다.\n"
+                "4. 생성된 키(`hf_...`)를 복사하여 **사이드바의 Access Token** 란에 적거나 `.streamlit/secrets.toml`에 저장하시면 **평생 무료로 최고급 한국어 AI(Qwen-7B)가 가동됩니다!**"
+            )
             return
 
         full_messages = [{"role": "system", "content": STOCK_SYSTEM_PROMPT}] + messages
@@ -76,11 +86,11 @@ class PremiumAIAgent:
                 if not self.model:
                     self.model = "gpt-4o-mini"
             elif self.provider == "gemini":
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
+                from google import genai
                 if not self.model:
-                    self.model = "gemini-3.0-flash"
-                self.client = genai.GenerativeModel(self.model)
+                    self.model = "gemini-2.5-flash"
+                # 신규 google-genai SDK 클라이언트 객체 생성
+                self.client = genai.Client(api_key=self.api_key)
         except Exception:
             self.client = None
 
@@ -96,48 +106,85 @@ class PremiumAIAgent:
             elif self.provider == "gemini":
                 yield from self._chat_gemini(messages, stream)
         except Exception as e:
+            yield from self._handle_api_error(e)
+
+    def _handle_api_error(self, e: Exception):
+        """API 에러를 사용자 친화적 메시지로 변환"""
+        error_msg = str(e).lower()
+        if any(k in error_msg for k in ["invalid_api_key", "invalid api key", "incorrect api key",
+                                         "authentication", "401", "api_key_invalid"]):
+            yield ("🔑 **API 키가 올바르지 않거나 활성화되지 않았습니다.**\n\n"
+                   "사이드바 → ⚙️ AI API 설정에서 키를 다시 확인해 주세요.")
+        elif any(k in error_msg for k in ["quota", "429", "rate limit", "exceeded"]):
+            yield "⏳ API 사용량 한도에 도달했습니다. 잠시 후 다시 시도하거나, 플랜을 확인해 주세요."
+        elif any(k in error_msg for k in ["model", "not found", "404", "is not supported"]):
+            yield (f"🤖 선택하신 모델 `{self.model}` 을(를) 찾을 수 없습니다.\n\n"
+                   "사이드바에서 다른 모델을 선택하거나, '직접 입력(Custom)'으로 정확한 모델명을 입력해 주세요.")
+        elif "permission" in error_msg or "403" in error_msg:
+            yield "🚫 해당 모델에 접근 권한이 없습니다. API 플랜과 권한 설정을 확인해 주세요."
+        else:
             yield f"⚠️ AI 응답 생성 실패: {str(e)}"
 
     def _chat_gpt(self, messages, stream):
         """GPT 채팅"""
         full_messages = [{"role": "system", "content": STOCK_SYSTEM_PROMPT}] + messages
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=full_messages,
-            max_tokens=2048,
-            stream=stream,
-        )
-        if stream:
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-        else:
-            yield response.choices[0].message.content
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=full_messages,
+                max_tokens=2048,
+                stream=stream,
+            )
+            if stream:
+                for chunk in response:
+                    if chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+            else:
+                yield response.choices[0].message.content
+        except Exception as e:
+            yield from self._handle_api_error(e)
 
     def _chat_gemini(self, messages, stream):
-        """Gemini 채팅"""
-        # Gemini 포맷으로 변환
+        """Gemini 채팅 (Modern google-genai SDK 구현)"""
+        from google.genai import types
+
         history = []
+        # types.Content 객체 형태로 히스토리 매핑
         for msg in messages[:-1]:
             role = "user" if msg["role"] == "user" else "model"
-            history.append({"role": role, "parts": [msg["content"]]})
+            history.append(types.Content(
+                role=role,
+                parts=[types.Part.from_text(text=msg["content"])]
+            ))
 
-        chat = self.client.start_chat(history=history)
-        last_msg = messages[-1]["content"] if messages else ""
-        prompt = f"{STOCK_SYSTEM_PROMPT}\n\n{last_msg}"
+        try:
+            # chats.create를 통한 세션 및 히스토리 초기화
+            chat = self.client.chats.create(
+                model=self.model,
+                history=history
+            )
+            last_msg = messages[-1]["content"] if messages else ""
+            prompt = f"{STOCK_SYSTEM_PROMPT}\n\n{last_msg}"
 
-        if stream:
-            response = chat.send_message(prompt, stream=True)
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
-        else:
-            response = chat.send_message(prompt)
-            yield response.text
+            if stream:
+                # 스트리밍 전송 API: send_message_stream()
+                response = chat.send_message_stream(prompt)
+                for chunk in response:
+                    if chunk.text:
+                        yield chunk.text
+            else:
+                # 단일 턴 응답 API: send_message()
+                response = chat.send_message(prompt)
+                yield response.text
+        except Exception as e:
+            yield from self._handle_api_error(e)
 
     def analyze_financials(self, financial_data: str, stream: bool = True):
         """재무제표 심층 분석"""
-        prompt = FINANCIAL_ANALYSIS_PROMPT.format(financial_data=financial_data)
+        try:
+            prompt = FINANCIAL_ANALYSIS_PROMPT.format(financial_data=financial_data)
+        except KeyError:
+            prompt = f"다음 재무 데이터를 분석해 주세요:\n{financial_data}"
         messages = [{"role": "user", "content": prompt}]
         yield from self.chat(messages, stream)
 
@@ -175,7 +222,8 @@ def format_financial_data_for_prompt(info: dict, financials: dict) -> str:
     if info.get("pbr"):
         lines.append(f"- PBR: {info['pbr']:.2f}")
     if info.get("dividend_yield"):
-        lines.append(f"- 배당수익률: {info['dividend_yield']*100:.2f}%")
+        # yfinance dividend_yield는 이미 퍼센트 단위(예: 2.5%)이므로 곱하지 않음
+        lines.append(f"- 배당수익률: {info['dividend_yield']:.2f}%")
 
     # 재무제표 요약
     if "income_statement" in financials:
