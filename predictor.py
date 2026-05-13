@@ -22,11 +22,38 @@ class StockPredictor:
     def _fit_and_predict(_self, ticker: str, period: str = "5y",
                          forecast_days: int = 90) -> tuple:
         """모델 학습 및 예측 (30분 캐싱)"""
+        import os
+        import tempfile
         from data_fetcher import get_stock_data
+
+        # ──────────────────────────────────────────────────────────────
+        # 윈도우 한글 사용자 계정 오류 방지 (cmdstanpy 한글 경로 버그 우회)
+        # ──────────────────────────────────────────────────────────────
+        original_env = {}
+        safe_temp = None
+        if os.name == 'nt':
+            try:
+                safe_temp = "C:\\Users\\Public\\StockInsight_Temp"
+                os.makedirs(safe_temp, exist_ok=True)
+                for var in ['TMPDIR', 'TEMP', 'TMP']:
+                    original_env[var] = os.environ.get(var)
+                    os.environ[var] = safe_temp
+                # 파이썬의 임시 폴더 캐시도 강제 변경
+                tempfile.tempdir = safe_temp
+            except Exception:
+                safe_temp = None
+
         from prophet import Prophet
 
         df = get_stock_data(ticker, period)
         if df.empty or len(df) < 60:
+            # 환경 변수 복원
+            if safe_temp:
+                for var, val in original_env.items():
+                    if val is not None:
+                        os.environ[var] = val
+                    else:
+                        os.environ.pop(var, None)
             return None, None, None
 
         # Prophet 포맷으로 변환
@@ -34,18 +61,28 @@ class StockPredictor:
         df_train.columns = ["ds", "y"]
         df_train["ds"] = pd.to_datetime(df_train["ds"]).dt.tz_localize(None)
 
-        # 모델 학습
-        model = Prophet(
-            daily_seasonality=False,
-            weekly_seasonality=True,
-            yearly_seasonality=True,
-            changepoint_prior_scale=0.05,
-        )
-        model.fit(df_train)
+        try:
+            # 모델 학습
+            model = Prophet(
+                daily_seasonality=False,
+                weekly_seasonality=True,
+                yearly_seasonality=True,
+                changepoint_prior_scale=0.05,
+            )
+            model.fit(df_train)
 
-        # 예측
-        future = model.make_future_dataframe(periods=forecast_days)
-        forecast = model.predict(future)
+            # 예측
+            future = model.make_future_dataframe(periods=forecast_days)
+            forecast = model.predict(future)
+        finally:
+            # 작업이 끝나면 환경 변수 원래대로 안전하게 복구
+            if safe_temp:
+                for var, val in original_env.items():
+                    if val is not None:
+                        os.environ[var] = val
+                    else:
+                        os.environ.pop(var, None)
+                tempfile.tempdir = None
 
         return model, forecast, df_train
 
@@ -160,11 +197,20 @@ class StockPredictor:
         ))
 
         # 현재 시점 구분선
-        last_date = self.df_train["ds"].max()
+        last_date = self.df_train["ds"].max().to_pydatetime()
         fig.add_vline(
             x=last_date, line_dash="dash",
             line_color=COLORS["accent_gold"], opacity=0.5,
-            annotation_text="현재", annotation_position="top",
+        )
+        fig.add_annotation(
+            x=last_date,
+            y=0.98,
+            yref="paper",
+            text="현재",
+            showarrow=False,
+            xanchor="right",
+            font=dict(color=COLORS["accent_gold"], size=11),
+            bgcolor="rgba(10,14,39,0.8)",
         )
 
         fig.update_layout(

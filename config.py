@@ -162,3 +162,25 @@ POPULAR_TICKERS = [
     "005930.KS", "000660.KS", "373220.KS", "035420.KS",
     "SPY", "QQQ", "ARKK",
 ]
+
+# ──────────────────────────────────────────────
+# 백테스터용 기업명 맵핑 사전
+# ──────────────────────────────────────────────
+ASSET_NAME_TO_TICKER = {
+    "애플 (Apple - AAPL)": "AAPL",
+    "마이크로소프트 (Microsoft - MSFT)": "MSFT",
+    "엔비디아 (NVIDIA - NVDA)": "NVDA",
+    "테슬라 (Tesla - TSLA)": "TSLA",
+    "구글 (Alphabet - GOOGL)": "GOOGL",
+    "아마존 (Amazon - AMZN)": "AMZN",
+    "메타 (Meta - META)": "META",
+    "삼성전자 (005930.KS)": "005930.KS",
+    "SK하이닉스 (000660.KS)": "000660.KS",
+    "LG에너지솔루션 (373220.KS)": "373220.KS",
+    "네이버 (NAVER - 035420.KS)": "035420.KS",
+    "카카오 (Kakao - 035720.KS)": "035720.KS",
+    "SPY (S&P500 ETF)": "SPY",
+    "QQQ (나스닥100 ETF)": "QQQ",
+    "ARKK (혁신기술 ETF)": "ARKK",
+}
+

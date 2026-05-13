@@ -19,6 +19,7 @@ from styles import inject_custom_css, render_page_header, render_disclaimer
 from config import (
     MARKET_INDICES, DEFAULT_WATCHLIST, PERIOD_OPTIONS,
     POPULAR_TICKERS, AI_MODELS, COLORS, BACKTEST_DEFAULTS,
+    ASSET_NAME_TO_TICKER,
 )
 
 # ─── CSS 주입 ───
@@ -384,29 +385,124 @@ def page_backtester():
 
     render_page_header("💼 포트폴리오 백테스터", "과거 데이터 기반 포트폴리오 성과 시뮬레이션")
 
-    # 포트폴리오 구성
+    # 세션 상태 초기화 (동적 자산 리스트 및 선택 항목 보전)
+    if "bt_asset_map" not in st.session_state:
+        st.session_state.bt_asset_map = ASSET_NAME_TO_TICKER.copy()
+    if "bt_selected_assets" not in st.session_state:
+        st.session_state.bt_selected_assets = ["애플 (Apple - AAPL)", "마이크로소프트 (Microsoft - MSFT)", "구글 (Alphabet - GOOGL)"]
+
+    # 포트폴리오 구성 UI
     st.subheader("📋 포트폴리오 구성")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        tickers_str = st.text_input(
-            "종목 코드 (쉼표 구분)",
-            value="AAPL, MSFT, GOOGL",
-            placeholder="예: AAPL, MSFT, NVDA",
+    col_select, col_add = st.columns([3, 1])
+    with col_select:
+        # 다중 선택 (세션 상태 연동으로 실시간 추가 지원)
+        selected_assets = st.multiselect(
+            "📊 포트폴리오 종목 선택 (기업명으로 검색 가능)",
+            options=list(st.session_state.bt_asset_map.keys()),
+            key="bt_selected_assets",
+            help="원하는 기업명이나 티커를 검색해 보세요. 여러 개를 중복하여 고를 수 있습니다."
         )
-        tickers = [t.strip() for t in tickers_str.split(",") if t.strip()]
 
-    with col2:
-        weights_str = st.text_input(
-            "비중 (쉼표 구분, 합계 자동 정규화)",
-            value=", ".join(["1"] * len(tickers)),
-            placeholder="예: 40, 30, 30",
-        )
-        try:
-            weights = [float(w.strip()) for w in weights_str.split(",") if w.strip()]
-        except ValueError:
-            weights = [1.0] * len(tickers)
+    with col_add:
+        # 실시간 글로벌 종목 검색 팝오버
+        with st.popover("🔍 기업명 검색 및 추가", width="stretch"):
+            st.markdown("##### 💡 티커를 모르신다면 검색하세요!")
+            st.caption("기업명 영문 사명, 혹은 티커 숫자를 입력해 실시간 데이터를 검색합니다.")
+            
+            search_q = st.text_input(
+                "주소록/기업 검색창", 
+                placeholder="예: Tesla, Samsung, Kakao, 005930",
+                key="bt_ticker_search_q",
+                label_visibility="collapsed"
+            )
+            
+            if search_q:
+                import yfinance as yf
+                try:
+                    with st.spinner("마켓 데이터 조회 중..."):
+                        search_res = yf.Search(search_q.strip(), max_results=6)
+                    
+                    if search_res and search_res.quotes:
+                        st.markdown("**📋 검색 매칭 결과 (클릭 시 즉시 포트폴리오 등록):**")
+                        for quote in search_res.quotes:
+                            symbol = quote.get("symbol")
+                            raw_name = quote.get("shortname") or quote.get("longname") or "이름없음"
+                            ex = quote.get("exchange", "N/A")
+                            
+                            # 표시 가독성을 위해 적절한 문자열 압축
+                            disp_name = raw_name[:15] + ".." if len(raw_name) > 17 else raw_name
+                            btn_label = f"➕ [{ex}] {symbol} | {disp_name}"
+                            
+                            # 버튼 액션: 맵에 넣고, 세션 선택 리스트에 병합 후 새로고침
+                            if st.button(btn_label, key=f"s_btn_{symbol}", width="stretch"):
+                                formatted_name = f"{raw_name} ({symbol})"
+                                
+                                # 리스트 맵에 등록
+                                if formatted_name not in st.session_state.bt_asset_map:
+                                    st.session_state.bt_asset_map[formatted_name] = symbol
+                                
+                                # 선택 목록에 강제 추가
+                                if formatted_name not in st.session_state.bt_selected_assets:
+                                    st.session_state.bt_selected_assets.append(formatted_name)
+                                
+                                st.toast(f"✅ {symbol} ({disp_name}) 종목을 포트폴리오에 바로 추가했습니다!")
+                                st.rerun()
+                    else:
+                        st.warning("🔍 매칭되는 종목을 찾지 못했습니다. 영문명을 정확히 써보세요.")
+                except Exception as e:
+                    st.error(f"⚠️ 검색 시스템 오류: {str(e)}")
+            
+            st.divider()
+            st.caption("💡 **검색 꿀팁**: 한글 종목은 `Samsung`, `Hyundai`, `Kakao`, `Naver` 같은 영문 발음이나 `005930` 처럼 종목번호 숫자로 검색하시면 가장 정확합니다.")
 
+    # 종목 및 비중 데이터 구성
+    tickers = []
+    weights = []
+
+    if selected_assets:
+        st.markdown('<p style="font-weight: 600; font-size: 0.95rem; margin-top: 10px; margin-bottom: 5px;">⚖️ 종목별 투자 비중 (%)</p>', unsafe_allow_html=True)
+        
+        # 3열 그리드로 보기 좋게 나열
+        grid_cols = st.columns(min(len(selected_assets), 3))
+        total_entered_pct = 0
+        
+        # 기본으로 균등 비중 부여
+        base_val = int(100 / len(selected_assets))
+
+        for i, asset in enumerate(selected_assets):
+            col_idx = i % 3
+            with grid_cols[col_idx]:
+                ticker = st.session_state.bt_asset_map[asset]
+                tickers.append(ticker)
+                
+                # 기업명 깔끔하게 파싱해 표시 (괄호 전까지만)
+                clean_name = asset.split("(")[0].strip()
+                
+                # 개별 비중 입력 위젯
+                pct = st.number_input(
+                    f"{clean_name} ({ticker})",
+                    min_value=1, max_value=100,
+                    value=base_val,
+                    step=5,
+                    key=f"bt_pct_{ticker}_{i}"
+                )
+                weights.append(float(pct))
+                total_entered_pct += pct
+
+        # 합계 알림 가이드
+        if total_entered_pct != 100:
+            st.info(f"💡 현재 입력 합계: **{total_entered_pct}%** (비율대로 100% 정규화되어 자동 연산됩니다.)")
+        else:
+            st.success(f"✅ 비중 합계가 정확히 **100%** 입니다!")
+    else:
+        st.warning("위의 선택창에서 분석하고자 하는 종목을 한 개 이상 지정해 주세요.")
+        return
+
+    st.divider()
+
+    # 시뮬레이션 기간 및 기타 설정
+    st.subheader("⚙️ 기간 및 초기 자산")
     col3, col4, col5 = st.columns(3)
     with col3:
         start_date = st.date_input(
@@ -416,24 +512,21 @@ def page_backtester():
         end_date = st.date_input("종료일", value=datetime.now())
     with col5:
         initial_capital = st.number_input(
-            "초기 투자금",
+            "초기 투자금 (KRW/USD)",
             value=BACKTEST_DEFAULTS["initial_capital"],
             step=1_000_000,
             format="%d",
         )
 
     benchmark = st.selectbox(
-        "벤치마크", ["SPY (S&P 500)", "QQQ (NASDAQ)", "EWY (한국)"],
+        "비교 기준 벤치마크", ["SPY (S&P 500)", "QQQ (NASDAQ)", "EWY (한국)"],
     )
     benchmark_ticker = benchmark.split(" ")[0]
 
-    if st.button("🚀 백테스트 실행", key="btn_backtest"):
+    if st.button("🚀 포트폴리오 백테스트 가동", key="btn_backtest"):
         if len(tickers) == 0:
-            st.error("❌ 종목을 최소 1개 이상 입력해주세요.")
+            st.error("❌ 분석할 종목이 지정되지 않았습니다.")
             return
-
-        if len(weights) != len(tickers):
-            weights = [1.0] * len(tickers)
 
         bt = PortfolioBacktester()
         bt.set_portfolio(
@@ -504,9 +597,17 @@ def page_settings():
     provider = st.session_state.get("ai_provider", "없음")
     api_key = st.session_state.get("api_key", "")
 
+    # Hugging Face 토큰 검출 안전 장치 (secrets.toml 부재 에러 방지)
+    hf_active = False
+    try:
+        if "HF_TOKEN" in st.secrets and st.secrets["HF_TOKEN"]:
+            hf_active = True
+    except Exception:
+        pass
+
     cols = st.columns(3)
     with cols[0]:
-        hf_status = "✅ 설정됨" if st.secrets.get("HF_TOKEN", "") else "❌ 미설정"
+        hf_status = "✅ 설정됨" if hf_active else "❌ 미설정"
         st.metric("Hugging Face", hf_status)
     with cols[1]:
         gpt_status = "✅ 활성" if "GPT" in provider and api_key else "⬜ 비활성"
