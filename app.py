@@ -573,11 +573,19 @@ def _render_technical_chart(ticker: str):
         return
 
     st.plotly_chart(create_candlestick_chart(df, ma_options, show_bb), width="stretch")
+    st.caption(
+        "캔들 차트는 가격의 흐름을 보는 기본 화면입니다. 이동평균선은 평균 매수가의 흐름처럼 보면 쉽고, "
+        "주가가 장기선 위에 오래 머물수록 추세가 강하다고 해석합니다."
+    )
 
     col_rsi, col_macd = st.columns(2)
     with col_rsi:
+        st.markdown("##### RSI: 과매수·과매도 온도계")
+        st.caption("RSI가 70 이상이면 단기 과열, 30 이하이면 단기 과매도 가능성을 의심합니다. 단독 매매 신호보다는 추세와 함께 보세요.")
         st.plotly_chart(create_rsi_chart(df), width="stretch")
     with col_macd:
+        st.markdown("##### MACD: 추세 전환 신호")
+        st.caption("MACD선이 신호선을 위로 돌파하면 상승 전환, 아래로 이탈하면 약세 전환 가능성을 봅니다. 횡보장에서는 신호가 자주 흔들릴 수 있습니다.")
         st.plotly_chart(create_macd_chart(df), width="stretch")
 
 
@@ -604,6 +612,66 @@ def _fmt_money(val, currency="USD"):
     return f"{sign}${av:,.0f}"
 
 
+def _format_statement_values(df, currency):
+    """Format financial statement cells in a pandas-version-safe way."""
+    formatter = lambda v: _fmt_money(v, currency)
+    if hasattr(df, "map"):
+        return df.map(formatter)
+    return df.applymap(formatter)
+
+
+def _fmt_metric_value(value, unit):
+    if value is None:
+        return "N/A"
+    if unit == "%":
+        return f"{value:+.2f}%"
+    if unit == "x":
+        return f"{value:.2f}x"
+    return f"{value:.2f}"
+
+
+def _metric_tone(label, value):
+    if value is None:
+        return "데이터 없음", "아직 판단하기 어렵습니다."
+    if label == "매출 성장률":
+        if value > 15:
+            return "빠른 성장", "매출이 강하게 늘고 있어 시장 수요나 점유율 확대를 기대할 수 있습니다."
+        if value > 0:
+            return "성장 중", "매출은 늘고 있지만 속도가 충분한지 업종 평균과 비교해 보세요."
+        return "주의", "매출이 줄고 있어 일시적 부진인지 구조적 둔화인지 확인이 필요합니다."
+    if label == "영업이익률":
+        if value > 20:
+            return "수익성 우수", "가격 결정력이나 비용 통제가 좋은 기업일 가능성이 큽니다."
+        if value > 10:
+            return "양호", "본업에서 안정적으로 이익을 남기는 편입니다."
+        if value > 0:
+            return "얇은 마진", "원가 상승이나 경기 둔화에 이익이 민감할 수 있습니다."
+        return "적자", "본업에서 손실이 나는 상태라 회복 여부가 중요합니다."
+    if label == "순이익률":
+        if value > 15:
+            return "이익 체력 좋음", "최종적으로 남는 돈의 비율이 높은 편입니다."
+        if value > 5:
+            return "보통 이상", "매출 대비 순이익이 무난하게 남고 있습니다."
+        if value > 0:
+            return "낮은 편", "비용, 이자, 세금 부담이 이익을 많이 깎고 있을 수 있습니다."
+        return "순손실", "최종 이익이 적자라 손실 원인을 확인해야 합니다."
+    if label == "ROE":
+        if value > 20:
+            return "자본 효율 우수", "주주 자본으로 이익을 잘 만들어내는 기업입니다."
+        if value > 10:
+            return "양호", "자본 효율성이 무난합니다."
+        if value > 0:
+            return "낮은 편", "투입한 자본 대비 이익 창출력이 약할 수 있습니다."
+        return "주의", "자본을 활용해 이익을 내지 못하고 있습니다."
+    if label == "부채비율":
+        if value < 1:
+            return "안정적", "부채보다 자기자본이 많아 재무 부담이 낮은 편입니다."
+        if value < 2:
+            return "보통", "일반적인 레버리지 수준입니다."
+        return "부채 부담", "금리 상승기나 실적 부진기에 재무 부담이 커질 수 있습니다."
+    return "참고", "다른 지표와 함께 흐름을 확인하세요."
+
+
 def _render_financial_statements(ticker: str, info: dict):
     """재무제표 3종 + 핵심 비율 표시"""
     from data_fetcher import get_financial_statements, compute_financial_summary
@@ -622,6 +690,7 @@ def _render_financial_statements(ticker: str, info: dict):
     metrics = summary.get("metrics", {}) if "error" not in summary else {}
     if metrics:
         st.markdown("##### 💎 핵심 재무 지표 (최근 회계연도 기준)")
+        st.caption("숫자만 보지 말고, 성장성·수익성·안정성을 나눠서 보면 기업의 체력이 더 쉽게 보입니다.")
         m_cols = st.columns(4)
         items = [
             ("매출 성장률", metrics.get("revenue_growth"), "%", "YoY"),
@@ -635,11 +704,14 @@ def _render_financial_statements(ticker: str, info: dict):
         items = [it for it in items if it[1] is not None]
         for i, (label, val, unit, sub) in enumerate(items):
             with m_cols[i % 4]:
-                val_str = f"{val:+.2f}{unit}" if unit == "%" else f"{val:.2f}{unit}"
+                val_str = _fmt_metric_value(val, unit)
+                tone, note = _metric_tone(label, val)
                 st.markdown(
                     f'<div class="fin-summary"><div class="label">{label}</div>'
                     f'<div class="value">{val_str}</div>'
-                    f'<div class="sub">{sub}</div></div>',
+                    f'<div class="sub">{sub}</div>'
+                    f'<div class="tone">{tone}</div>'
+                    f'<div class="note">{note}</div></div>',
                     unsafe_allow_html=True,
                 )
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -677,7 +749,7 @@ def _render_financial_statements(ticker: str, info: dict):
             return
         df_view = df.iloc[:, :4].copy()  # 최근 4개년
         df_view.columns = [c.strftime("%Y-%m") if hasattr(c, "strftime") else str(c) for c in df_view.columns]
-        df_view = df_view.applymap(lambda v: _fmt_money(v, currency))
+        df_view = _format_statement_values(df_view, currency)
         df_view.insert(0, "항목", df_view.index)
         st.dataframe(df_view, width="stretch", hide_index=True, height=min(420, len(df_view) * 32 + 50))
 
