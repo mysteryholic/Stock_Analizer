@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 from config import MARKET_INDICES, INTERVAL_MAP
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+# 일 단위 갱신으로 충분 → 일일 1회만 KRX 전체 리스트 호출
+@st.cache_data(ttl=86400 * 7, show_spinner=False, persist="disk")
 def get_unified_krx_db() -> pd.DataFrame:
     """국내 주식(KRX) 및 ETF 리스트를 병합하여 통합 로컬 탐색 데이터베이스 생성"""
     data = []
@@ -172,9 +173,9 @@ def resolve_korean_ticker(ticker: str) -> str:
     return t
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
-    """주식 히스토리컬 데이터 수집 (5분 캐싱)"""
+    """주식 히스토리컬 데이터 수집 (10분 캐싱)"""
     try:
         ticker = resolve_korean_ticker(ticker)
         interval = INTERVAL_MAP.get(period, "1d")
@@ -232,7 +233,7 @@ def get_market_indices_v2() -> dict:
     return results
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def get_stock_info(ticker: str) -> dict:
     """기업 기본 정보 수집"""
     try:
@@ -259,9 +260,9 @@ def get_stock_info(ticker: str) -> dict:
         return {"name": ticker, "error": str(e)}
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_financial_statements(ticker: str) -> dict:
-    """재무제표 데이터 수집 (10분 캐싱)"""
+    """재무제표 데이터 수집 (1시간 캐싱)"""
     try:
         ticker = resolve_korean_ticker(ticker)
         stock = yf.Ticker(ticker)
@@ -278,6 +279,120 @@ def get_financial_statements(ticker: str) -> dict:
         return result
     except Exception as e:
         return {"error": str(e)}
+
+
+def _safe_row(df, candidates):
+    """재무제표 DataFrame에서 후보 행 이름 중 처음 매칭되는 시리즈를 반환"""
+    if df is None or df.empty:
+        return None
+    for name in candidates:
+        if name in df.index:
+            return df.loc[name]
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def compute_financial_summary(ticker: str) -> dict:
+    """재무제표를 분석해서 핵심 지표/추세/등급 요약을 반환"""
+    fin = get_financial_statements(ticker)
+    if "error" in fin or not fin:
+        return {"error": fin.get("error", "재무 데이터 없음")}
+
+    summary = {"years": [], "revenue": [], "operating_income": [], "net_income": [],
+               "total_assets": [], "total_liabilities": [], "equity": [],
+               "op_cashflow": [], "free_cashflow": []}
+
+    inc = fin.get("income_statement")
+    bal = fin.get("balance_sheet")
+    cf = fin.get("cashflow")
+
+    # 시간 축은 손익계산서 기준 (최근→과거)
+    if inc is not None and not inc.empty:
+        cols = list(inc.columns)[:4]  # 최근 4개년
+        summary["years"] = [c.strftime("%Y") if hasattr(c, "strftime") else str(c) for c in cols]
+
+        rev = _safe_row(inc, ["Total Revenue", "TotalRevenue", "Revenue"])
+        op = _safe_row(inc, ["Operating Income", "OperatingIncome"])
+        ni = _safe_row(inc, ["Net Income", "NetIncome", "Net Income Common Stockholders"])
+
+        for c in cols:
+            summary["revenue"].append(float(rev[c]) if rev is not None and c in rev.index and rev[c] == rev[c] else None)
+            summary["operating_income"].append(float(op[c]) if op is not None and c in op.index and op[c] == op[c] else None)
+            summary["net_income"].append(float(ni[c]) if ni is not None and c in ni.index and ni[c] == ni[c] else None)
+
+    if bal is not None and not bal.empty:
+        ta = _safe_row(bal, ["Total Assets", "TotalAssets"])
+        tl = _safe_row(bal, ["Total Liabilities Net Minority Interest", "Total Liab", "TotalLiabilitiesNetMinorityInterest"])
+        eq = _safe_row(bal, ["Total Equity Gross Minority Interest", "Stockholders Equity", "Total Stockholder Equity"])
+
+        cols_b = list(bal.columns)[:4]
+        # 손익 컬럼과 매칭이 안되는 경우, 빈 슬롯을 None으로 채움
+        years_target = summary["years"] if summary["years"] else [c.strftime("%Y") if hasattr(c, "strftime") else str(c) for c in cols_b]
+        if not summary["years"]:
+            summary["years"] = years_target
+
+        for y in summary["years"]:
+            matched = None
+            for c in cols_b:
+                cy = c.strftime("%Y") if hasattr(c, "strftime") else str(c)
+                if cy == y:
+                    matched = c
+                    break
+            summary["total_assets"].append(float(ta[matched]) if ta is not None and matched is not None and ta[matched] == ta[matched] else None)
+            summary["total_liabilities"].append(float(tl[matched]) if tl is not None and matched is not None and tl[matched] == tl[matched] else None)
+            summary["equity"].append(float(eq[matched]) if eq is not None and matched is not None and eq[matched] == eq[matched] else None)
+
+    if cf is not None and not cf.empty:
+        ocf = _safe_row(cf, ["Operating Cash Flow", "Total Cash From Operating Activities", "CashFlowFromContinuingOperatingActivities"])
+        fcf = _safe_row(cf, ["Free Cash Flow", "FreeCashFlow"])
+        capex = _safe_row(cf, ["Capital Expenditure", "CapitalExpenditure"])
+
+        cols_c = list(cf.columns)[:4]
+        for y in summary["years"]:
+            matched = None
+            for c in cols_c:
+                cy = c.strftime("%Y") if hasattr(c, "strftime") else str(c)
+                if cy == y:
+                    matched = c
+                    break
+            ocf_v = float(ocf[matched]) if ocf is not None and matched is not None and ocf[matched] == ocf[matched] else None
+            summary["op_cashflow"].append(ocf_v)
+
+            if fcf is not None and matched is not None and fcf[matched] == fcf[matched]:
+                summary["free_cashflow"].append(float(fcf[matched]))
+            elif ocf_v is not None and capex is not None and matched is not None and capex[matched] == capex[matched]:
+                # FCF = Operating CF - CapEx (CapEx는 음수로 들어오는 경우가 많음)
+                summary["free_cashflow"].append(ocf_v + float(capex[matched]))
+            else:
+                summary["free_cashflow"].append(None)
+
+    # ── 파생 지표 (가장 최근 회계연도 기준) ──
+    def _g(arr, i): return arr[i] if len(arr) > i and arr[i] is not None else None
+    rev0, rev1 = _g(summary["revenue"], 0), _g(summary["revenue"], 1)
+    op0 = _g(summary["operating_income"], 0)
+    ni0, ni1 = _g(summary["net_income"], 0), _g(summary["net_income"], 1)
+    ta0 = _g(summary["total_assets"], 0)
+    tl0 = _g(summary["total_liabilities"], 0)
+    eq0 = _g(summary["equity"], 0)
+
+    metrics = {}
+    if rev0 and rev1 and rev1 != 0:
+        metrics["revenue_growth"] = (rev0 - rev1) / abs(rev1) * 100
+    if ni0 and ni1 and ni1 != 0:
+        metrics["net_income_growth"] = (ni0 - ni1) / abs(ni1) * 100
+    if op0 and rev0 and rev0 != 0:
+        metrics["operating_margin"] = op0 / rev0 * 100
+    if ni0 and rev0 and rev0 != 0:
+        metrics["net_margin"] = ni0 / rev0 * 100
+    if tl0 and eq0 and eq0 != 0:
+        metrics["debt_to_equity"] = tl0 / eq0
+    if ni0 and eq0 and eq0 != 0:
+        metrics["roe"] = ni0 / eq0 * 100
+    if ni0 and ta0 and ta0 != 0:
+        metrics["roa"] = ni0 / ta0 * 100
+
+    summary["metrics"] = metrics
+    return summary
 
 
 @st.cache_data(ttl=300, show_spinner=False)

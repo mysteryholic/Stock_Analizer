@@ -5,24 +5,34 @@ StockInsight Omni - 스타일 & PWA 모듈
 import streamlit as st
 
 
+@st.cache_data(show_spinner=False)
+def _load_css() -> str:
+    """style.css를 디스크에서 한 번만 읽어 메모리 캐싱 (매 rerun마다 디스크 I/O 회피)"""
+    import os
+    css_path = os.path.join(os.path.dirname(__file__), "style.css")
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
+
+
 def inject_custom_css():
     """커스텀 CSS와 PWA 메타태그를 Streamlit 앱에 주입"""
+    # 폰트는 swap·preconnect로 렌더 차단 최소화 (initial-scale=1, 줌 허용해 접근성 개선)
     st.markdown("""
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="StockInsight">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0a0e27">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#000000">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
     """, unsafe_allow_html=True)
 
-    # CSS를 별도 파일에서 읽어오기
-    import os
-    css_path = os.path.join(os.path.dirname(__file__), "style.css")
-    if os.path.exists(css_path):
-        with open(css_path, "r", encoding="utf-8") as f:
-            css = f.read()
+    css = _load_css()
+    if css:
         st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 

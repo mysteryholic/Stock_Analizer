@@ -50,7 +50,8 @@ class HuggingFaceAgent:
             response = self.client.chat.completions.create(
                 model=self.model_id,
                 messages=full_messages,
-                max_tokens=1024,
+                max_tokens=768,
+                temperature=0.6,
                 stream=stream,
             )
             if stream:
@@ -183,23 +184,24 @@ class PremiumAIAgent:
             ))
 
         try:
-            # chats.create를 통한 세션 및 히스토리 초기화
+            # system_instruction은 chats.create의 config로 전달하면 매 요청마다 프롬프트 앞에 붙이는 비용이 사라져 스트리밍 시작이 더 빠릅니다.
             chat = self.client.chats.create(
                 model=self.model,
-                history=history
+                history=history,
+                config=types.GenerateContentConfig(
+                    system_instruction=STOCK_SYSTEM_PROMPT,
+                    max_output_tokens=1536,
+                ),
             )
             last_msg = messages[-1]["content"] if messages else ""
-            prompt = f"{STOCK_SYSTEM_PROMPT}\n\n{last_msg}"
 
             if stream:
-                # 스트리밍 전송 API: send_message_stream()
-                response = chat.send_message_stream(prompt)
+                response = chat.send_message_stream(last_msg)
                 for chunk in response:
                     if chunk.text:
                         yield chunk.text
             else:
-                # 단일 턴 응답 API: send_message()
-                response = chat.send_message(prompt)
+                response = chat.send_message(last_msg)
                 yield response.text
         except Exception as e:
             yield from self._handle_api_error(e)

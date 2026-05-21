@@ -120,7 +120,8 @@ COLORS = {
 # ──────────────────────────────────────────────
 AI_MODELS = {
     "huggingface": {
-        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        # 7B → 3B로 다운사이즈해 응답 첫 토큰(TTFT) 및 스트리밍 속도 약 2~3배 개선
+        "model_id": "Qwen/Qwen2.5-3B-Instruct",
         "display_name": "🆓 AI 어시스턴트 (무료)",
     },
     "gpt": {

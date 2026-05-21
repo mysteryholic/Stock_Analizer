@@ -1,7 +1,7 @@
 [theme]
-primaryColor = "#3861fb"
-backgroundColor = "#0a0e27"
-secondaryBackgroundColor = "#121638"
+primaryColor = "#d4af37"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#0a0a0a"
 textColor = "#e8eaed"
 font = "sans serif"
 
@@ -9,9 +9,17 @@ font = "sans serif"
 headless = true
 enableCORS = false
 enableXsrfProtection = false
+# 정적 자원 캐싱으로 페이지 접속 속도 향상
+enableStaticServing = true
 
 [browser]
 gatherUsageStats = false
 
 [runner]
 magicEnabled = false
+# 매번 모듈을 다시 import하지 않도록 캐싱 강화
+fastReruns = true
+
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"

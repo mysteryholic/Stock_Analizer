@@ -165,7 +165,7 @@ def render_sidebar():
         <div style="text-align:center; padding: 1rem 0 0.5rem 0;">
             <span style="font-size: 2.2rem;">📊</span>
             <h2 style="margin: 0.3rem 0 0 0; font-size: 1.2rem; font-weight: 800;
-                background: linear-gradient(135deg, #3861fb, #8b5cf6);
+                background: linear-gradient(135deg, #f8f3df, #d4af37);
                 -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                 StockInsight Omni
             </h2>
@@ -179,7 +179,7 @@ def render_sidebar():
 
         page = st.radio(
             "NAVIGATION",
-            ["📊 대시보드", "📈 기술적 분석", "🤖 AI 애널리스트",
+            ["📊 대시보드", "📈 종목 분석", "🤖 AI 애널리스트",
              "🔮 AI 예측", "💼 백테스터", "⚙️ 설정"],
             label_visibility="collapsed",
         )
@@ -491,70 +491,315 @@ def page_dashboard():
 
 
 # ══════════════════════════════════════════════
-# 페이지: 기술적 분석
+# 페이지: 종목 분석 (기술 + 재무)
 # ══════════════════════════════════════════════
 def page_technical(ticker_input: str):
-    """기술적 분석 페이지"""
-    from data_fetcher import get_stock_data, get_stock_info, format_number, format_price
-    from indicators import (
-        create_candlestick_chart, create_rsi_chart, create_macd_chart,
-    )
+    """종목 분석 페이지 — 차트, 재무제표, 재무 분석 통합"""
+    from data_fetcher import get_stock_info, format_number, format_price
 
-    render_page_header("📈 기술적 분석", "캔들스틱 차트, 이동평균선, RSI, MACD 지표")
+    render_page_header("📈 종목 분석", "차트 · 재무제표 · 재무 분석을 한 화면에서")
 
     # 종목 선택기
     ticker = render_stock_selector("📊 분석할 종목 선택", "tech", default_ticker=ticker_input or "AAPL")
+    if not ticker:
+        return
+
+    with st.spinner(f"{ticker} 기본 정보 로딩..."):
+        info = get_stock_info(ticker)
+
+    if "error" in info:
+        st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
+        return
+
+    # 종목 정보 카드 (공통 헤더)
+    cols = st.columns(4)
+    with cols[0]:
+        price = info.get("current_price")
+        st.metric("현재가", format_price(price, info.get("currency", "USD")))
+    with cols[1]:
+        st.metric("시가총액", format_number(info.get("market_cap"), info.get("currency", "")))
+    with cols[2]:
+        per = info.get("per")
+        st.metric("PER", f"{per:.2f}" if per else "N/A")
+    with cols[3]:
+        dy = info.get("dividend_yield")
+        st.metric("배당수익률", f"{dy:.2f}%" if dy else "N/A")
+
+    st.divider()
+
+    tab_chart, tab_fs, tab_fa = st.tabs(["📊 차트 & 지표", "📑 재무제표", "💡 재무 분석"])
+
+    # ── 탭1: 차트 & 기술 지표 ──
+    with tab_chart:
+        _render_technical_chart(ticker)
+
+    # ── 탭2: 재무제표 ──
+    with tab_fs:
+        _render_financial_statements(ticker, info)
+
+    # ── 탭3: 재무 분석 (규칙 기반 자동 해설) ──
+    with tab_fa:
+        _render_financial_analysis(ticker, info)
+
+
+def _render_technical_chart(ticker: str):
+    """차트 & 기술 지표 탭"""
+    from data_fetcher import get_stock_data
+    from indicators import create_candlestick_chart, create_rsi_chart, create_macd_chart
 
     col2, col3 = st.columns(2)
     with col2:
-        period_label = st.selectbox("기간", list(PERIOD_OPTIONS.keys()), index=3)
+        period_label = st.selectbox("기간", list(PERIOD_OPTIONS.keys()), index=3, key="tech_period")
         period = PERIOD_OPTIONS[period_label]
     with col3:
-        ma_options = st.multiselect(
-            "이동평균선", [5, 10, 20, 60, 120], default=[5, 20, 60],
+        ma_options = st.multiselect("이동평균선", [5, 10, 20, 60, 120], default=[5, 20, 60], key="tech_ma")
+
+    show_bb = st.checkbox("볼린저 밴드 표시", value=False, key="tech_bb")
+
+    with st.spinner(f"{ticker} 시세 로딩 중..."):
+        df = get_stock_data(ticker, period)
+
+    if df.empty:
+        st.warning("시세 데이터를 불러올 수 없습니다.")
+        return
+
+    st.plotly_chart(create_candlestick_chart(df, ma_options, show_bb), width="stretch")
+
+    col_rsi, col_macd = st.columns(2)
+    with col_rsi:
+        st.plotly_chart(create_rsi_chart(df), width="stretch")
+    with col_macd:
+        st.plotly_chart(create_macd_chart(df), width="stretch")
+
+
+def _fmt_money(val, currency="USD"):
+    """재무제표 숫자 포맷 (조 / 억 / B / M 단위 자동)"""
+    if val is None:
+        return "—"
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return "—"
+    if v != v:  # NaN
+        return "—"
+    sign = "-" if v < 0 else ""
+    av = abs(v)
+    if currency == "KRW":
+        if av >= 1e12: return f"{sign}₩{av/1e12:.2f}조"
+        if av >= 1e8:  return f"{sign}₩{av/1e8:.0f}억"
+        return f"{sign}₩{av:,.0f}"
+    # USD 외
+    if av >= 1e12: return f"{sign}${av/1e12:.2f}T"
+    if av >= 1e9:  return f"{sign}${av/1e9:.2f}B"
+    if av >= 1e6:  return f"{sign}${av/1e6:.2f}M"
+    return f"{sign}${av:,.0f}"
+
+
+def _render_financial_statements(ticker: str, info: dict):
+    """재무제표 3종 + 핵심 비율 표시"""
+    from data_fetcher import get_financial_statements, compute_financial_summary
+
+    with st.spinner("재무제표 로딩 중..."):
+        fin = get_financial_statements(ticker)
+        summary = compute_financial_summary(ticker)
+
+    if "error" in fin or not fin:
+        st.warning("⚠️ 이 종목의 재무제표 데이터를 불러올 수 없습니다. (일부 ETF/지수 종목은 미제공)")
+        return
+
+    currency = info.get("currency", "USD")
+
+    # ── 핵심 비율 요약 카드 ──
+    metrics = summary.get("metrics", {}) if "error" not in summary else {}
+    if metrics:
+        st.markdown("##### 💎 핵심 재무 지표 (최근 회계연도 기준)")
+        m_cols = st.columns(4)
+        items = [
+            ("매출 성장률", metrics.get("revenue_growth"), "%", "YoY"),
+            ("영업이익률", metrics.get("operating_margin"), "%", "Operating Margin"),
+            ("순이익률", metrics.get("net_margin"), "%", "Net Margin"),
+            ("ROE", metrics.get("roe"), "%", "자기자본이익률"),
+            ("ROA", metrics.get("roa"), "%", "총자산이익률"),
+            ("부채비율", metrics.get("debt_to_equity"), "x", "Liabilities / Equity"),
+            ("순이익 성장률", metrics.get("net_income_growth"), "%", "YoY"),
+        ]
+        items = [it for it in items if it[1] is not None]
+        for i, (label, val, unit, sub) in enumerate(items):
+            with m_cols[i % 4]:
+                val_str = f"{val:+.2f}{unit}" if unit == "%" else f"{val:.2f}{unit}"
+                st.markdown(
+                    f'<div class="fin-summary"><div class="label">{label}</div>'
+                    f'<div class="value">{val_str}</div>'
+                    f'<div class="sub">{sub}</div></div>',
+                    unsafe_allow_html=True,
+                )
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ── 트렌드 차트 ──
+    if summary.get("years") and "error" not in summary:
+        import plotly.graph_objects as go
+        years = summary["years"][::-1]  # 과거→최근 순으로 뒤집기
+        rev = summary["revenue"][::-1]
+        op = summary["operating_income"][::-1]
+        ni = summary["net_income"][::-1]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=years, y=rev, name="매출액", marker_color="#d4af37"))
+        fig.add_trace(go.Bar(x=years, y=op, name="영업이익", marker_color="#00d4aa"))
+        fig.add_trace(go.Bar(x=years, y=ni, name="순이익", marker_color="#3861fb"))
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            barmode="group",
+            height=320,
+            margin=dict(l=10, r=10, t=30, b=10),
+            title="📈 매출 · 영업이익 · 순이익 추이",
+            legend=dict(orientation="h", y=-0.15),
         )
+        st.plotly_chart(fig, width="stretch")
 
-    show_bb = st.checkbox("볼린저 밴드 표시", value=False)
+    # ── 재무제표 3종 (탭) ──
+    fs_tab1, fs_tab2, fs_tab3 = st.tabs(["📋 손익계산서", "🏦 재무상태표", "💵 현금흐름표"])
 
-    if ticker:
-        with st.spinner(f"{ticker} 데이터 로딩 중..."):
-            df = get_stock_data(ticker, period)
-            info = get_stock_info(ticker)
-
-        if df.empty:
-            st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
+    def _render_statement(df, label):
+        if df is None or df.empty:
+            st.info(f"{label} 데이터가 없습니다.")
             return
+        df_view = df.iloc[:, :4].copy()  # 최근 4개년
+        df_view.columns = [c.strftime("%Y-%m") if hasattr(c, "strftime") else str(c) for c in df_view.columns]
+        df_view = df_view.applymap(lambda v: _fmt_money(v, currency))
+        df_view.insert(0, "항목", df_view.index)
+        st.dataframe(df_view, width="stretch", hide_index=True, height=min(420, len(df_view) * 32 + 50))
 
-        # 종목 정보 카드
-        if "error" not in info:
-            cols = st.columns(4)
-            with cols[0]:
-                price = info.get("current_price")
-                st.metric("현재가", format_price(price, info.get("currency", "USD")))
-            with cols[1]:
-                st.metric("시가총액", format_number(info.get("market_cap"), info.get("currency", "")))
-            with cols[2]:
-                per = info.get("per")
-                st.metric("PER", f"{per:.2f}" if per else "N/A")
-            with cols[3]:
-                dy = info.get("dividend_yield")
-                # yfinance의 dividend_yield는 이미 퍼센트 단위 수치(예: 2.5)로 전달됩니다.
-                st.metric("배당수익률", f"{dy:.2f}%" if dy else "N/A")
+    with fs_tab1:
+        _render_statement(fin.get("income_statement"), "손익계산서")
+    with fs_tab2:
+        _render_statement(fin.get("balance_sheet"), "재무상태표")
+    with fs_tab3:
+        _render_statement(fin.get("cashflow"), "현금흐름표")
 
-        st.divider()
 
-        # 캔들스틱 차트
-        st.plotly_chart(
-            create_candlestick_chart(df, ma_options, show_bb),
-            width="stretch",
-        )
+def _render_financial_analysis(ticker: str, info: dict):
+    """규칙 기반 재무 자동 해설 (무료 사용자도 사용 가능)"""
+    from data_fetcher import compute_financial_summary
 
-        # RSI & MACD
-        col_rsi, col_macd = st.columns(2)
-        with col_rsi:
-            st.plotly_chart(create_rsi_chart(df), width="stretch")
-        with col_macd:
-            st.plotly_chart(create_macd_chart(df), width="stretch")
+    with st.spinner("재무 분석 중..."):
+        summary = compute_financial_summary(ticker)
+
+    if "error" in summary:
+        st.warning("⚠️ 재무 데이터를 분석할 수 없습니다.")
+        return
+
+    m = summary.get("metrics", {})
+    if not m:
+        st.info("분석 가능한 재무 지표가 부족합니다.")
+        return
+
+    name = info.get("name", ticker)
+    st.markdown(f"#### 🔍 {name} 재무 진단 리포트")
+
+    # ── 1) 성장성 ──
+    st.markdown("##### 📈 1. 성장성 (Growth)")
+    rev_g = m.get("revenue_growth")
+    ni_g = m.get("net_income_growth")
+    if rev_g is not None:
+        if rev_g > 15:
+            st.success(f"✅ **매출 성장률 {rev_g:+.1f}%** — 매우 우수한 외형 성장세입니다. 시장 점유율 확대 또는 강력한 수요가 뒷받침되고 있습니다.")
+        elif rev_g > 5:
+            st.info(f"🟢 **매출 성장률 {rev_g:+.1f}%** — 견조한 성장세를 유지 중입니다.")
+        elif rev_g > 0:
+            st.warning(f"🟡 **매출 성장률 {rev_g:+.1f}%** — 성장세가 둔화되고 있어 산업 사이클 점검이 필요합니다.")
+        else:
+            st.error(f"🔴 **매출 성장률 {rev_g:+.1f}%** — 매출이 역성장 중입니다. 사업 모델·시장 환경 점검이 시급합니다.")
+
+    if ni_g is not None:
+        if ni_g > 20:
+            st.success(f"✅ **순이익 성장률 {ni_g:+.1f}%** — 이익 체력이 빠르게 개선되고 있습니다.")
+        elif ni_g > 0:
+            st.info(f"🟢 **순이익 성장률 {ni_g:+.1f}%** — 이익이 안정적으로 증가합니다.")
+        else:
+            st.error(f"🔴 **순이익 성장률 {ni_g:+.1f}%** — 이익이 감소 중입니다. 비용 구조와 마진 압박 요인을 점검해야 합니다.")
+
+    # ── 2) 수익성 ──
+    st.markdown("##### 💰 2. 수익성 (Profitability)")
+    op_m = m.get("operating_margin")
+    net_m = m.get("net_margin")
+    roe = m.get("roe")
+
+    if op_m is not None:
+        if op_m > 20:
+            st.success(f"✅ **영업이익률 {op_m:.1f}%** — 매우 높은 마진으로 강력한 가격 결정력 보유 (소프트웨어/럭셔리 등급).")
+        elif op_m > 10:
+            st.info(f"🟢 **영업이익률 {op_m:.1f}%** — 안정적인 수익 구조입니다.")
+        elif op_m > 0:
+            st.warning(f"🟡 **영업이익률 {op_m:.1f}%** — 마진이 얇은 편입니다. 원가/판관비 변동에 민감할 수 있습니다.")
+        else:
+            st.error(f"🔴 **영업이익률 {op_m:.1f}%** — 영업적자 상태로 수익성 회복이 핵심 과제입니다.")
+
+    if net_m is not None:
+        st.info(f"📊 **순이익률 {net_m:.1f}%** — 매출 1달러당 {net_m:.1f}센트가 순이익으로 남습니다.")
+
+    if roe is not None:
+        if roe > 20:
+            st.success(f"✅ **ROE {roe:.1f}%** — 워런 버핏이 선호하는 15%+ 기준을 크게 상회합니다.")
+        elif roe > 10:
+            st.info(f"🟢 **ROE {roe:.1f}%** — 양호한 자본 효율성을 보입니다.")
+        elif roe > 0:
+            st.warning(f"🟡 **ROE {roe:.1f}%** — 자본 효율성이 다소 낮습니다.")
+        else:
+            st.error(f"🔴 **ROE {roe:.1f}%** — 자본을 효율적으로 활용하지 못하고 있습니다.")
+
+    # ── 3) 재무 안정성 ──
+    st.markdown("##### 🏦 3. 재무 안정성 (Stability)")
+    de = m.get("debt_to_equity")
+    if de is not None:
+        if de < 1:
+            st.success(f"✅ **부채비율 {de:.2f}x** — 부채보다 자본이 많아 매우 안정적인 재무 구조입니다.")
+        elif de < 2:
+            st.info(f"🟢 **부채비율 {de:.2f}x** — 일반적인 수준의 레버리지입니다.")
+        elif de < 3:
+            st.warning(f"🟡 **부채비율 {de:.2f}x** — 부채 의존도가 높아 금리 상승기에 부담이 될 수 있습니다.")
+        else:
+            st.error(f"🔴 **부채비율 {de:.2f}x** — 부채가 자본의 3배 이상으로 재무 위험이 큽니다.")
+
+    # ── 4) 밸류에이션 ──
+    st.markdown("##### 🎯 4. 밸류에이션 & 배당")
+    per = info.get("per")
+    pbr = info.get("pbr")
+    dy = info.get("dividend_yield")
+    val_cols = st.columns(3)
+    with val_cols[0]:
+        if per:
+            tone = "✅" if per < 15 else "🟢" if per < 25 else "🟡" if per < 40 else "🔴"
+            st.markdown(f"**PER** {tone} `{per:.2f}`")
+            if per < 15: st.caption("저평가 구간 — 가치주 성격")
+            elif per < 25: st.caption("적정 밸류에이션")
+            else: st.caption("프리미엄 부여 — 성장 기대 반영")
+    with val_cols[1]:
+        if pbr:
+            tone = "✅" if pbr < 1 else "🟢" if pbr < 3 else "🟡"
+            st.markdown(f"**PBR** {tone} `{pbr:.2f}`")
+    with val_cols[2]:
+        if dy:
+            st.markdown(f"**배당수익률** 💵 `{dy:.2f}%`")
+
+    # ── 5) 종합 점수 ──
+    st.markdown("##### 🏆 종합 평가")
+    score = 0
+    max_score = 0
+    if rev_g is not None: score += min(20, max(0, rev_g)); max_score += 20
+    if op_m is not None:  score += min(20, max(0, op_m));   max_score += 20
+    if roe is not None:   score += min(20, max(0, roe));    max_score += 20
+    if de is not None:    score += max(0, 20 - de * 5);     max_score += 20
+    if per:               score += max(0, 20 - max(0, per - 10) * 0.5); max_score += 20
+
+    if max_score > 0:
+        pct = (score / max_score) * 100
+        grade = "S" if pct >= 80 else "A" if pct >= 65 else "B" if pct >= 50 else "C" if pct >= 35 else "D"
+        st.progress(min(int(pct), 100), text=f"종합 재무 건전성 {pct:.0f}점 · 등급 **{grade}**")
+
+    st.caption("💡 이 분석은 yfinance 재무 데이터에 기반한 규칙 기반 자동 해설입니다. 투자 권유가 아니며, AI 애널리스트 메뉴에서 GPT/Gemini를 연결하면 더 깊이 있는 분석을 받을 수 있습니다.")
 
 
 # ══════════════════════════════════════════════
@@ -596,12 +841,8 @@ def page_ai_analyst(ticker_input: str):
         else:
             st.caption("💡 사이드바에서 GPT/Gemini API 키를 입력하면 심층 분석 기능이 활성화됩니다.")
 
-    # 프리미엄 전용: 재무 분석 탭
-    if tier == "premium":
-        tab_chat, tab_analysis = st.tabs(["💬 챗봇", "📊 재무 분석"])
-    else:
-        tab_chat = st.container()
-        tab_analysis = None
+    # 재무 분석 탭은 무료/프리미엄 모두 제공 (무료는 규칙 기반 + AI 챗 보조)
+    tab_chat, tab_analysis = st.tabs(["💬 챗봇", "📊 AI 재무 분석"])
 
     # 챗봇 탭
     with tab_chat:
@@ -626,24 +867,44 @@ def page_ai_analyst(ticker_input: str):
                 )
             st.session_state.ai_messages.append({"role": "assistant", "content": response})
 
-    # 재무 분석 탭 (프리미엄)
-    if tab_analysis is not None:
-        with tab_analysis:
-            from data_fetcher import get_stock_info, get_financial_statements
+    # 재무 분석 탭 (무료/프리미엄 공용 - 프리미엄은 AI 심층 분석 추가)
+    with tab_analysis:
+        from data_fetcher import get_stock_info, get_financial_statements
 
-            analysis_ticker = render_stock_selector("📊 분석할 종목 선택", "analysis", default_ticker=ticker_input or "AAPL")
-            if st.button("🤖 AI 심층 재무 분석 시작", key="btn_analysis", width="stretch"):
-                with st.spinner("재무 데이터 수집 중..."):
-                    info = get_stock_info(analysis_ticker)
-                    financials = get_financial_statements(analysis_ticker)
+        analysis_ticker = render_stock_selector("📊 분석할 종목 선택", "analysis", default_ticker=ticker_input or "AAPL")
 
-                if "error" in info:
-                    st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
-                else:
-                    data_text = format_financial_data_for_prompt(info, financials)
-                    st.markdown("---")
-                    st.subheader(f"📊 {info.get('name', analysis_ticker)} AI 분석 리포트")
-                    response = st.write_stream(agent.analyze_financials(data_text))
+        col_a, col_b = st.columns([1, 1])
+        with col_a:
+            run_basic = st.button("📊 기본 재무 진단 보기", key="btn_basic_fin", width="stretch")
+        with col_b:
+            run_ai = st.button(
+                "🤖 AI 심층 분석 실행" + ("" if tier == "premium" else " (프리미엄 필요)"),
+                key="btn_analysis", width="stretch",
+                disabled=(tier != "premium"),
+            )
+
+        if run_basic:
+            info = get_stock_info(analysis_ticker)
+            if "error" in info:
+                st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
+            else:
+                st.markdown("---")
+                _render_financial_statements(analysis_ticker, info)
+                st.markdown("---")
+                _render_financial_analysis(analysis_ticker, info)
+
+        if run_ai and tier == "premium":
+            with st.spinner("재무 데이터 수집 중..."):
+                info = get_stock_info(analysis_ticker)
+                financials = get_financial_statements(analysis_ticker)
+
+            if "error" in info:
+                st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
+            else:
+                data_text = format_financial_data_for_prompt(info, financials)
+                st.markdown("---")
+                st.subheader(f"📊 {info.get('name', analysis_ticker)} AI 심층 분석 리포트")
+                st.write_stream(agent.analyze_financials(data_text))
 
 
 # ══════════════════════════════════════════════
@@ -1050,7 +1311,7 @@ def main():
 
     if page == "📊 대시보드":
         page_dashboard()
-    elif page == "📈 기술적 분석":
+    elif page == "📈 종목 분석":
         page_technical(ticker_input)
     elif page == "🤖 AI 애널리스트":
         page_ai_analyst(ticker_input)
