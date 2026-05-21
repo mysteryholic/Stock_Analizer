@@ -508,7 +508,16 @@ def page_technical(ticker_input: str):
         info = get_stock_info(ticker)
 
     if "error" in info:
-        st.error("⚠️ 지원하지 않는 종목이거나 티커를 확인해주세요.")
+        st.error("⚠️ 종목 정보를 불러오지 못했습니다. 티커를 확인하거나 잠시 후 다시 시도해 주세요.")
+        with st.expander("🛠 상세 오류 (Yahoo Finance 응답)"):
+            st.code(info.get("error", "Unknown"))
+            st.caption(
+                "Streamlit Cloud의 공용 IP가 Yahoo Finance에서 일시적으로 차단되면 "
+                "모든 종목에서 동일 오류가 발생할 수 있습니다. 새로고침 또는 캐시 초기화 후 다시 시도해 보세요."
+            )
+        if st.button("🔄 캐시 초기화 후 재시도", key=f"retry_{ticker}"):
+            st.cache_data.clear()
+            st.rerun()
         return
 
     # 종목 정보 카드 (공통 헤더)

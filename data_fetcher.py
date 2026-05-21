@@ -233,29 +233,88 @@ def get_market_indices_v2() -> dict:
     return results
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def get_stock_info(ticker: str) -> dict:
-    """기업 기본 정보 수집"""
+def _fetch_stock_info_uncached(ticker: str) -> dict:
+    """yfinance `info` 호출 + 실패 시 `fast_info` 폴백 — 캐시 미적용 원본 함수"""
+    ticker = resolve_korean_ticker(ticker)
+    stock = yf.Ticker(ticker)
+
+    info = {}
+    info_err = None
     try:
-        ticker = resolve_korean_ticker(ticker)
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        info = stock.info or {}
+    except Exception as e:
+        info_err = str(e)
+
+    # info가 비었거나 가격이 없으면 fast_info 폴백 (클라우드 IP 차단 / crumb 인증 실패 시)
+    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+    market_cap = info.get("marketCap", 0)
+    currency = info.get("currency", "USD")
+
+    if current_price is None:
+        try:
+            fi = stock.fast_info
+            # fast_info는 객체/딕트 양쪽 형태가 모두 존재
+            def _fi(key):
+                if fi is None:
+                    return None
+                try:
+                    if hasattr(fi, key):
+                        return getattr(fi, key)
+                    if hasattr(fi, "__getitem__"):
+                        return fi[key]
+                except Exception:
+                    return None
+                return None
+
+            current_price = _fi("last_price") or _fi("lastPrice") or _fi("regular_market_price")
+            if not market_cap:
+                market_cap = _fi("market_cap") or _fi("marketCap") or 0
+            if currency == "USD":
+                currency = _fi("currency") or "USD"
+        except Exception as e:
+            if info_err is None:
+                info_err = str(e)
+
+    name = info.get("shortName") or info.get("longName") or ticker
+
+    # 어떤 데이터도 받지 못한 경우에만 에러 처리
+    if current_price is None and not market_cap and name == ticker:
         return {
-            "name": info.get("shortName", info.get("longName", ticker)),
-            "sector": info.get("sector", "N/A"),
-            "industry": info.get("industry", "N/A"),
-            "market_cap": info.get("marketCap", 0),
-            "per": info.get("trailingPE", None),
-            "pbr": info.get("priceToBook", None),
-            "dividend_yield": info.get("dividendYield", None),
-            "52w_high": info.get("fiftyTwoWeekHigh", None),
-            "52w_low": info.get("fiftyTwoWeekLow", None),
-            "current_price": info.get("currentPrice", info.get("regularMarketPrice", None)),
-            "volume": info.get("volume", info.get("regularMarketVolume", 0)),
-            "avg_volume": info.get("averageVolume", 0),
-            "description": info.get("longBusinessSummary", ""),
-            "currency": info.get("currency", "USD"),
+            "name": ticker,
+            "error": info_err or "Yahoo Finance에서 데이터를 받지 못했습니다. (Cloud IP 차단/일시 장애 가능)",
         }
+
+    return {
+        "name": name,
+        "sector": info.get("sector", "N/A"),
+        "industry": info.get("industry", "N/A"),
+        "market_cap": market_cap or 0,
+        "per": info.get("trailingPE"),
+        "pbr": info.get("priceToBook"),
+        "dividend_yield": info.get("dividendYield"),
+        "52w_high": info.get("fiftyTwoWeekHigh"),
+        "52w_low": info.get("fiftyTwoWeekLow"),
+        "current_price": current_price,
+        "volume": info.get("volume", info.get("regularMarketVolume", 0)),
+        "avg_volume": info.get("averageVolume", 0),
+        "description": info.get("longBusinessSummary", ""),
+        "currency": currency,
+    }
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_stock_info(ticker: str) -> dict:
+    data = _fetch_stock_info_uncached(ticker)
+    # 에러는 캐시에 남기지 않도록 예외로 승격 (Streamlit의 cache_data는 예외를 캐시하지 않음)
+    if "error" in data:
+        raise RuntimeError(data["error"])
+    return data
+
+
+def get_stock_info(ticker: str) -> dict:
+    """기업 기본 정보 수집 — 성공 결과만 캐싱, 실패 시 다음 호출에서 재시도"""
+    try:
+        return _cached_stock_info(ticker)
     except Exception as e:
         return {"name": ticker, "error": str(e)}
 
