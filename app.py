@@ -556,6 +556,12 @@ def _render_technical_chart(ticker: str):
     from data_fetcher import get_stock_data
     from indicators import create_candlestick_chart
 
+    st.markdown("#### 📈 종합 기술 차트")
+    st.caption(
+        "캔들·이동평균선·볼린저 밴드와 선택한 보조지표(거래량/RSI/MACD)를 "
+        "**같은 시간축**으로 한 화면에서 비교합니다. 메인 차트를 확대·이동하면 보조지표도 함께 움직입니다."
+    )
+
     col2, col3 = st.columns(2)
     with col2:
         period_label = st.selectbox("기간", list(PERIOD_OPTIONS.keys()), index=3, key="tech_period")
@@ -588,11 +594,75 @@ def _render_technical_chart(ticker: str):
         width="stretch",
         config={"scrollZoom": True, "displaylogo": False},
     )
-    st.caption(
-        "차트 위에서 마우스 휠로 확대·축소하고 드래그로 이동할 수 있습니다. "
-        "선택한 보조지표는 메인 차트와 같은 시간축으로 함께 움직입니다. "
-        "RSI는 70↑ 과열·30↓ 과매도, MACD는 시그널 돌파로 추세 전환을 봅니다."
+
+    # ── 조작 팁 ──
+    st.info(
+        "🖱️ **조작 팁** · 차트 위에서 **마우스 휠**로 확대·축소 · **드래그**로 이동 · "
+        "**더블클릭**으로 원래 보기 복귀 · 보조지표는 메인 차트와 함께 움직입니다."
     )
+
+    # ── 차트 읽기 가이드 (선택한 구성요소만 동적으로 노출) ──
+    with st.expander("📖 이 차트 읽는 법 (구성요소별 가이드)", expanded=False):
+        st.markdown("##### 🕯️ 캔들 차트 (메인)")
+        st.markdown(
+            "- **양봉(상승)**: 종가가 시가보다 높음 — 매수 우위\n"
+            "- **음봉(하락)**: 종가가 시가보다 낮음 — 매도 우위\n"
+            "- **꼬리(그림자)**: 장중 고가·저가의 흔적 — 길수록 변동성 큼"
+        )
+
+        if ma_options:
+            st.markdown("---")
+            st.markdown(f"##### 📉 이동평균선 (SMA {', '.join(str(m) for m in ma_options)})")
+            st.markdown(
+                "- 일정 기간 종가의 평균을 이은 선. **단기선이 장기선 위**에 있으면 상승 추세, 아래면 하락 추세\n"
+                "- 단기선이 장기선을 위로 뚫으면 **골든크로스**(상승 신호), 아래로 뚫으면 **데드크로스**(하락 신호)\n"
+                "- 주가가 장기선 위에 오래 머물수록 추세가 강하다고 봅니다"
+            )
+
+        if show_bb:
+            st.markdown("---")
+            st.markdown("##### 🎯 볼린저 밴드 (BB)")
+            st.markdown(
+                "- 20일 이동평균선 ± **표준편차×2**로 그린 변동성 통로\n"
+                "- 밴드 **상단 터치**: 단기 과열 가능 · **하단 터치**: 단기 과매도 가능\n"
+                "- 밴드가 **좁아질수록** 변동성 축적 → 곧 큰 움직임의 신호로 해석"
+            )
+
+        if "volume" in indicators:
+            st.markdown("---")
+            st.markdown("##### 📊 거래량")
+            st.markdown(
+                "- 그날 거래된 주식 수. 막대 색은 그날 캔들과 동일(빨강=상승, 파랑=하락)\n"
+                "- **거래량 급증 + 상승**: 매수세 진짜 유입 · **거래량 급증 + 하락**: 투매 가능\n"
+                "- 추세 전환을 확인할 때 거래량이 함께 늘었는지 보세요"
+            )
+
+        if "rsi" in indicators:
+            st.markdown("---")
+            st.markdown("##### 🌡️ RSI (Relative Strength Index, 14일)")
+            st.markdown(
+                "- **0~100** 범위. 최근 14일간 상승·하락 강도를 비율로 표현한 모멘텀 지표\n"
+                "- **70 이상**(빨강 영역): 단기 과매수 — 단기 조정 가능성 의심\n"
+                "- **30 이하**(초록 영역): 단기 과매도 — 단기 반등 가능성 의심\n"
+                "- 단독 매매 신호보다는 **추세와 함께** 판단하세요"
+            )
+
+        if "macd" in indicators:
+            st.markdown("---")
+            st.markdown("##### 📐 MACD (Moving Average Convergence Divergence)")
+            st.markdown(
+                "- **MACD선**(12일 EMA − 26일 EMA)과 **Signal선**(MACD의 9일 EMA)의 교차로 추세 전환을 봅니다\n"
+                "- MACD가 Signal을 **위로 돌파** → 상승 전환 (골든크로스)\n"
+                "- MACD가 Signal을 **아래로 이탈** → 하락 전환 (데드크로스)\n"
+                "- **히스토그램**: MACD − Signal 값. 0 위/아래 막대 길이로 추세 강도 확인\n"
+                "- 횡보장에서는 신호가 자주 흔들릴 수 있어 추세장에서 더 잘 맞습니다"
+            )
+
+        st.markdown("---")
+        st.caption(
+            "⚠️ 모든 보조지표는 **후행 지표**입니다. 단독으로 매매 결정을 내리기보다 "
+            "여러 신호와 종목의 펀더멘털·전체 시장 흐름을 함께 판단하세요."
+        )
 
 
 def _fmt_money(val, currency="USD"):
