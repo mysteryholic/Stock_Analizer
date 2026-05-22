@@ -554,7 +554,7 @@ def page_technical(ticker_input: str):
 def _render_technical_chart(ticker: str):
     """차트 & 기술 지표 탭"""
     from data_fetcher import get_stock_data
-    from indicators import create_candlestick_chart, create_rsi_chart, create_macd_chart
+    from indicators import create_candlestick_chart
 
     col2, col3 = st.columns(2)
     with col2:
@@ -563,7 +563,18 @@ def _render_technical_chart(ticker: str):
     with col3:
         ma_options = st.multiselect("이동평균선", [5, 10, 20, 60, 120], default=[5, 20, 60], key="tech_ma")
 
-    show_bb = st.checkbox("볼린저 밴드 표시", value=False, key="tech_bb")
+    col_bb, col_ind = st.columns([1, 3])
+    with col_bb:
+        show_bb = st.checkbox("볼린저 밴드 표시", value=False, key="tech_bb")
+    with col_ind:
+        ind_labels = {"거래량": "volume", "RSI": "rsi", "MACD": "macd"}
+        selected_labels = st.multiselect(
+            "보조지표 (메인 차트와 함께 이동·확대)",
+            list(ind_labels.keys()),
+            default=["거래량", "RSI", "MACD"],
+            key="tech_indicators",
+        )
+        indicators = [ind_labels[l] for l in selected_labels]
 
     with st.spinner(f"{ticker} 시세 로딩 중..."):
         df = get_stock_data(ticker, period)
@@ -572,21 +583,16 @@ def _render_technical_chart(ticker: str):
         st.warning("시세 데이터를 불러올 수 없습니다.")
         return
 
-    st.plotly_chart(create_candlestick_chart(df, ma_options, show_bb), width="stretch")
-    st.caption(
-        "캔들 차트는 가격의 흐름을 보는 기본 화면입니다. 이동평균선은 평균 매수가의 흐름처럼 보면 쉽고, "
-        "주가가 장기선 위에 오래 머물수록 추세가 강하다고 해석합니다."
+    st.plotly_chart(
+        create_candlestick_chart(df, ma_options, show_bb, indicators),
+        width="stretch",
+        config={"scrollZoom": True, "displaylogo": False},
     )
-
-    col_rsi, col_macd = st.columns(2)
-    with col_rsi:
-        st.markdown("##### RSI: 과매수·과매도 온도계")
-        st.caption("RSI가 70 이상이면 단기 과열, 30 이하이면 단기 과매도 가능성을 의심합니다. 단독 매매 신호보다는 추세와 함께 보세요.")
-        st.plotly_chart(create_rsi_chart(df), width="stretch")
-    with col_macd:
-        st.markdown("##### MACD: 추세 전환 신호")
-        st.caption("MACD선이 신호선을 위로 돌파하면 상승 전환, 아래로 이탈하면 약세 전환 가능성을 봅니다. 횡보장에서는 신호가 자주 흔들릴 수 있습니다.")
-        st.plotly_chart(create_macd_chart(df), width="stretch")
+    st.caption(
+        "차트 위에서 마우스 휠로 확대·축소하고 드래그로 이동할 수 있습니다. "
+        "선택한 보조지표는 메인 차트와 같은 시간축으로 함께 움직입니다. "
+        "RSI는 70↑ 과열·30↓ 과매도, MACD는 시그널 돌파로 추세 전환을 봅니다."
+    )
 
 
 def _fmt_money(val, currency="USD"):
