@@ -552,15 +552,15 @@ def page_technical(ticker_input: str):
 
 
 def _render_technical_chart(ticker: str):
-    """차트 & 기술 지표 탭"""
+    """차트 & 기술 지표 탭 — 초보자용: 각 차트 위에 전용 설명 expander."""
     from data_fetcher import get_stock_data
-    from indicators import create_candlestick_chart
+    from indicators import (
+        create_candlestick_chart, create_volume_chart,
+        create_rsi_chart, create_macd_chart,
+    )
 
     st.markdown("#### 📈 종합 기술 차트")
-    st.caption(
-        "캔들·이동평균선·볼린저 밴드와 선택한 보조지표(거래량/RSI/MACD)를 "
-        "**같은 시간축**으로 한 화면에서 비교합니다. 메인 차트를 확대·이동하면 보조지표도 함께 움직입니다."
-    )
+    st.caption("각 차트 위의 **'❓ 이게 뭐예요?'** 박스를 펼쳐 무슨 그래프인지 확인하세요.")
 
     col2, col3 = st.columns(2)
     with col2:
@@ -575,7 +575,7 @@ def _render_technical_chart(ticker: str):
     with col_ind:
         ind_labels = {"거래량": "volume", "RSI": "rsi", "MACD": "macd"}
         selected_labels = st.multiselect(
-            "보조지표 (메인 차트와 함께 이동·확대)",
+            "보여줄 보조지표",
             list(ind_labels.keys()),
             default=["거래량", "RSI", "MACD"],
             key="tech_indicators",
@@ -589,73 +589,92 @@ def _render_technical_chart(ticker: str):
         st.warning("시세 데이터를 불러올 수 없습니다.")
         return
 
-    # ── 구성요소별 가이드 (차트 바로 위, 각각 독립 접기) ──
-    guides = []
-    guides.append((
-        "🕯️ 캔들",
-        "- **양봉(상승)**: 종가 > 시가 — 매수 우위\n"
-        "- **음봉(하락)**: 종가 < 시가 — 매도 우위\n"
-        "- **꼬리**: 장중 고·저가의 흔적 — 길수록 변동성 큼",
-    ))
-    if ma_options:
-        guides.append((
-            f"📉 이동평균선 (SMA {','.join(str(m) for m in ma_options)})",
-            "- 일정 기간 종가의 평균을 이은 선. 단기선이 장기선 위면 **상승 추세**, 아래면 하락 추세\n"
-            "- 단기선이 장기선을 위로 뚫으면 **골든크로스**, 아래로 뚫으면 **데드크로스**\n"
-            "- 주가가 장기선 위에 오래 머물수록 추세가 강합니다",
-        ))
-    if show_bb:
-        guides.append((
-            "🎯 볼린저 밴드",
-            "- 20일 이동평균선 **± 표준편차×2**로 그린 변동성 통로\n"
-            "- 상단 터치: 단기 과열 가능 · 하단 터치: 단기 과매도 가능\n"
-            "- 밴드가 좁아질수록 변동성 축적 → 곧 큰 움직임 신호",
-        ))
-    if "volume" in indicators:
-        guides.append((
-            "📊 거래량",
-            "- 그날 거래된 주식 수. 막대 색은 그날 캔들과 동일\n"
-            "- **거래량 급증 + 상승**: 매수세 진짜 유입\n"
-            "- **거래량 급증 + 하락**: 투매 가능 — 추세 전환은 거래량과 함께 확인",
-        ))
-    if "rsi" in indicators:
-        guides.append((
-            "🌡️ RSI (14일)",
-            "- **0~100** 범위의 모멘텀 지표 (최근 14일 상승·하락 강도 비율)\n"
-            "- **70 이상**: 단기 과매수 — 조정 가능성 의심\n"
-            "- **30 이하**: 단기 과매도 — 반등 가능성 의심\n"
-            "- 단독 신호보다 추세와 함께 판단하세요",
-        ))
-    if "macd" in indicators:
-        guides.append((
-            "📐 MACD",
-            "- **MACD선**(12·26일 EMA 차) × **Signal선**(MACD의 9일 EMA) 교차로 추세 전환 포착\n"
-            "- MACD가 Signal **위로 돌파** → 상승 전환 · **아래로 이탈** → 하락 전환\n"
-            "- **히스토그램**: MACD−Signal. 0 위/아래 막대로 추세 강도 확인\n"
-            "- 횡보장에서는 신호가 자주 흔들립니다",
-        ))
+    plot_cfg = {"scrollZoom": True, "displaylogo": False}
 
-    st.markdown("**📖 차트 구성요소** — 항목을 펼쳐 의미를 확인하세요")
-    # 3개씩 한 줄로 나열 (각 expander는 독립적으로 접고 펼 수 있음)
-    n_per_row = 3
-    for i in range(0, len(guides), n_per_row):
-        row = guides[i:i + n_per_row]
-        cols = st.columns(n_per_row)
-        for col, (title, body) in zip(cols, row):
-            with col:
-                with st.expander(title, expanded=False):
-                    st.markdown(body)
-
+    # ════════════════════════════════════════════
+    # 1) 메인 캔들 차트 (이동평균선 + 볼린저 밴드)
+    # ════════════════════════════════════════════
+    st.markdown("### 🕯️ 가격 차트 (캔들)")
+    with st.expander("❓ 이게 뭐예요? — 캔들 차트 읽는 법", expanded=False):
+        st.markdown(
+            "**캔들 한 개 = 하루의 가격 움직임**\n"
+            "- 🔴 **양봉 (빨강)**: 종가가 시가보다 **올랐다** → 그날은 상승\n"
+            "- 🔵 **음봉 (파랑)**: 종가가 시가보다 **내렸다** → 그날은 하락\n"
+            "- **몸통**: 시가 ↔ 종가 구간 · **꼬리(그림자)**: 장중 최고가·최저가\n"
+            "- 꼬리가 길면 그날 변동성이 컸다는 뜻"
+        )
+        if ma_options:
+            st.markdown(
+                f"\n**📉 함께 그려진 이동평균선 (SMA {', '.join(str(m) for m in ma_options)}일)**\n"
+                "- 최근 N일간 종가의 평균을 이은 선 — 추세 방향을 부드럽게 보여줌\n"
+                "- 주가가 **장기선 위에 오래 머물면 상승 추세**가 강한 것\n"
+                "- 단기선이 장기선을 위로 뚫으면 **골든크로스(매수 신호)**, 아래로 뚫으면 **데드크로스(매도 신호)**"
+            )
+        if show_bb:
+            st.markdown(
+                "\n**🎯 함께 그려진 볼린저 밴드**\n"
+                "- 20일 평균선 **± 표준편차×2**로 만든 변동성 통로 (보라색 점선)\n"
+                "- 주가가 **상단에 닿으면** 단기 과열, **하단에 닿으면** 단기 과매도 가능\n"
+                "- 밴드가 **좁아지면** 곧 큰 움직임이 올 신호로 자주 해석됨"
+            )
     st.plotly_chart(
-        create_candlestick_chart(df, ma_options, show_bb, indicators),
-        width="stretch",
-        config={"scrollZoom": True, "displaylogo": False},
+        create_candlestick_chart(df, ma_options, show_bb),
+        width="stretch", config=plot_cfg,
     )
 
+    # ════════════════════════════════════════════
+    # 2) 거래량
+    # ════════════════════════════════════════════
+    if "volume" in indicators:
+        st.markdown("### 📊 거래량")
+        with st.expander("❓ 이게 뭐예요? — 거래량 보는 법", expanded=False):
+            st.markdown(
+                "**거래량 = 그날 사고팔린 주식 수**\n"
+                "- 막대 색은 그날 캔들과 같음 (🔴 상승일 / 🔵 하락일)\n"
+                "- 🚀 **거래량 급증 + 가격 상승** → 진짜 매수세가 들어왔다는 강한 신호\n"
+                "- ⚠️ **거래량 급증 + 가격 하락** → 투매(공포 매도) 가능성\n"
+                "- 가격이 움직였는데 거래량이 적으면 그 움직임은 신뢰도가 낮음\n"
+                "- **추세 전환을 판단할 땐 항상 거래량과 함께 보세요**"
+            )
+        st.plotly_chart(create_volume_chart(df), width="stretch", config=plot_cfg)
+
+    # ════════════════════════════════════════════
+    # 3) RSI
+    # ════════════════════════════════════════════
+    if "rsi" in indicators:
+        st.markdown("### 🌡️ RSI — 과매수·과매도 온도계")
+        with st.expander("❓ 이게 뭐예요? — RSI 읽는 법", expanded=False):
+            st.markdown(
+                "**RSI (Relative Strength Index, 14일 기준)**\n"
+                "- **0 ~ 100** 사이 값. 최근 14일 동안의 상승·하락 강도를 비율로 표현\n"
+                "- 🔴 **70 이상 (빨강 영역)**: 단기 과매수 — 너무 많이 올라서 조정 가능성 의심\n"
+                "- 🟢 **30 이하 (초록 영역)**: 단기 과매도 — 너무 많이 떨어져서 반등 가능성 의심\n"
+                "- 점선(70/50/30)은 판단 기준선\n"
+                "- ⚠️ RSI **하나만 보고 매매하지 마세요**. 추세가 강하면 70 위에 오래 머물 수도 있습니다 — 항상 가격 추세와 같이 보세요"
+            )
+        st.plotly_chart(create_rsi_chart(df), width="stretch", config=plot_cfg)
+
+    # ════════════════════════════════════════════
+    # 4) MACD
+    # ════════════════════════════════════════════
+    if "macd" in indicators:
+        st.markdown("### 📐 MACD — 추세 전환 신호")
+        with st.expander("❓ 이게 뭐예요? — MACD 읽는 법", expanded=False):
+            st.markdown(
+                "**MACD (Moving Average Convergence Divergence)**\n"
+                "- **MACD선** = 12일 EMA − 26일 EMA (단기·장기 평균의 차이)\n"
+                "- **Signal선** = MACD의 9일 EMA (MACD를 한 번 더 평탄화)\n"
+                "- 🚀 MACD가 Signal을 **위로 뚫으면** → 상승 전환 신호 (골든크로스)\n"
+                "- ⚠️ MACD가 Signal을 **아래로 이탈하면** → 하락 전환 신호 (데드크로스)\n"
+                "- **막대(히스토그램)** = MACD − Signal. 0선 위·아래 막대 길이로 추세의 힘을 봄\n"
+                "- 추세가 뚜렷한 장에서 잘 맞고, 횡보장에서는 신호가 자주 흔들립니다"
+            )
+        st.plotly_chart(create_macd_chart(df), width="stretch", config=plot_cfg)
+
     st.caption(
-        "🖱️ 마우스 휠 = 확대·축소 · 드래그 = 이동 · 더블클릭 = 원래 보기 · "
-        "보조지표는 메인 차트와 함께 움직입니다. "
-        "⚠️ 모든 보조지표는 후행 지표이므로 펀더멘털·시장 흐름과 함께 보세요."
+        "🖱️ 차트 위 **마우스 휠**로 확대·축소 · **드래그**로 이동 · **더블클릭**으로 복귀. "
+        "⚠️ 모든 보조지표는 **후행 지표**입니다. 단독으로 매매를 결정하기보다 "
+        "여러 신호 + 기업 펀더멘털 + 시장 흐름을 종합 판단하세요."
     )
 
 
